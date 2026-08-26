@@ -1,0 +1,577 @@
+use std::fs;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{OnceLock, RwLock};
+use std::time::Duration;
+
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
+use tauri::{AppHandle, Emitter, Manager};
+
+const SETTINGS_FILE: &str = "settings.json";
+const RECEIVED_MESSAGES_FILE: &str = "received_messages.json";
+const MAX_RECEIVED_MESSAGES: usize = 200;
+/// Debounce window for received-message disk flushes. Appends are O(1) in
+/// memory; at most one write per window no matter how busy the feed is.
+const RECEIVED_FLUSH_DEBOUNCE: Duration = Duration::from_secs(5);
+
+/// In-memory settings cache. The settings file is only written by this app,
+/// so a read-through cache invalidated on save is always coherent, and the
+/// hot RX paths (2-3 lookups per received packet) stop hitting the disk.
+static SETTINGS_CACHE: OnceLock<RwLock<Option<AppSettings>>> = OnceLock::new();
+
+fn settings_cache() -> &'static RwLock<Option<AppSettings>> {
+    SETTINGS_CACHE.get_or_init(|| RwLock::new(None))
+}
+
+/// In-memory received-message store (source of truth while running).
+static RECEIVED_CACHE: OnceLock<RwLock<Option<Vec<Value>>>> = OnceLock::new();
+/// Notifies the single long-lived flush worker that a write is needed.
+static RECEIVED_FLUSH_NOTIFY: OnceLock<tokio::sync::Notify> = OnceLock::new();
+static RECEIVED_FLUSHER_STARTED: AtomicBool = AtomicBool::new(false);
+
+fn received_cache() -> &'static RwLock<Option<Vec<Value>>> {
+    RECEIVED_CACHE.get_or_init(|| RwLock::new(None))
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct AppSettings {
+    pub source: String,
+    pub path: String,
+    pub host: String,
+    pub port: String,
+    /// Optional AGW (RX monitor) port override. When empty, the RX port is
+    /// derived as KISS port - 1 (Dire Wolf / Graywolf 8001/8000 convention).
+    pub agw_port: String,
+    pub aprsis_host: String,
+    pub aprsis_port: String,
+    pub aprsis_passcode: String,
+    pub aprsis_filter: String,
+    pub beacon_lat: String,
+    pub beacon_lon: String,
+    pub beacon_symbol: String,
+    pub web_server_port: String,
+    pub web_server_auto_start: bool,
+    /// Shared token required for web remote-control API calls. Empty means
+    /// remote access is only allowed from localhost (loopback exempt).
+    pub web_server_token: String,
+    pub auto_beacon_on_connect: bool,
+    pub auto_beacon_interval_secs: u32,
+    pub show_ack_messages: bool,
+    pub play_message_sound: bool,
+    pub promiscuous_base_callsign: bool,
+    pub theme_mode: String,
+    pub msg_font_size: u32,
+}
+
+impl Default for AppSettings {
+    fn default() -> Self {
+        Self {
+            source: String::new(),
+            path: String::new(),
+            host: String::new(),
+            port: String::new(),
+            agw_port: String::new(),
+            aprsis_host: String::new(),
+            aprsis_port: String::new(),
+            aprsis_passcode: String::new(),
+            aprsis_filter: String::new(),
+            beacon_lat: String::new(),
+            beacon_lon: String::new(),
+            beacon_symbol: String::new(),
+            web_server_port: String::new(),
+            web_server_auto_start: false,
+            web_server_token: String::new(),
+            auto_beacon_on_connect: true,
+            auto_beacon_interval_secs: 1500,
+            show_ack_messages: false,
+            play_message_sound: true,
+            promiscuous_base_callsign: false,
+            theme_mode: "system".to_string(),
+            msg_font_size: 15,
+        }
+    }
+}
+
+fn settings_path(app: &AppHandle) -> Result<std::path::PathBuf, String> {
+    let dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|err| format!("failed to resolve app data directory: {err}"))?;
+    fs::create_dir_all(&dir)
+        .map_err(|err| format!("failed to create app data directory: {err}"))?;
+    Ok(dir.join(SETTINGS_FILE))
+}
+
+fn unwrap_third_party_info(raw: &str) -> Option<&str> {
+    let trimmed = raw.trim();
+    let inner = trimmed.strip_prefix('}')?;
+    let colon = inner.find(':')?;
+    Some(&inner[colon + 1..])
+}
+
+fn extract_aprs_message_text(info_text: &str) -> String {
+    if !info_text.starts_with(':') || info_text.len() < 11 {
+        return info_text.to_string();
+    }
+
+    let inner = &info_text[1..];
+    if inner.find(':') != Some(9) {
+        return info_text.to_string();
+    }
+
+    let body = &inner[10..];
+    if let Some(ack_body) = normalize_ack_display_body(body) {
+        ack_body
+    } else if let Some(brace_idx) = body.rfind('{') {
+        body[..brace_idx].to_string()
+    } else {
+        body.to_string()
+    }
+}
+
+fn normalize_ack_display_body(body: &str) -> Option<String> {
+    let trimmed = body.trim();
+    if trimmed.len() < 3 || !trimmed[..3].eq_ignore_ascii_case("ack") {
+        return None;
+    }
+
+    // Some networks occasionally surface reply-ack delimiters as ')' instead of '}'.
+    // Canonicalize once so ACK display stays stable and parseable.
+    let canonical = if trimmed.contains(')') && !trimmed.contains('}') {
+        trimmed.replacen(')', "}", 1)
+    } else {
+        trimmed.to_string()
+    };
+
+    let ack_id = crate::tnc::parse_ack_id(&canonical)?;
+    Some(format!("ack{ack_id}"))
+}
+
+fn extract_aprs_display_body(raw: &str) -> String {
+    let trimmed = raw.trim();
+    let protocol_body = unwrap_third_party_info(trimmed).unwrap_or(trimmed);
+    extract_aprs_message_text(protocol_body).trim().to_string()
+}
+
+fn parse_received_addressee(raw: &str) -> Option<String> {
+    let trimmed = raw.trim();
+    if !trimmed.starts_with(':') || trimmed.len() < 11 {
+        return None;
+    }
+
+    let inner = &trimmed[1..];
+    if inner.find(':') != Some(9) {
+        return None;
+    }
+
+    Some(inner[..9].trim().to_uppercase())
+}
+
+fn aprs_frame_type(body: &str) -> &'static str {
+    match body.chars().next() {
+        Some('!') | Some('=') => "pos",
+        Some('@') | Some('/') => "pos+t",
+        Some(':') => "msg",
+        Some('>') => "status",
+        Some(';') => "obj",
+        Some(')') => "item",
+        Some('`') | Some('\'') => "mic-e",
+        Some('T') => "tlm",
+        Some('_') => "wx",
+        _ => "other",
+    }
+}
+
+fn is_aprs_telemetry_metadata(body: &str) -> bool {
+    let message_text = extract_aprs_message_text(body).trim().to_uppercase();
+    message_text.starts_with("PARM.")
+        || message_text.starts_with("UNIT.")
+        || message_text.starts_with("EQNS.")
+        || message_text.starts_with("BITS.")
+}
+
+fn is_aprs_weather_report(body: &str) -> bool {
+    let trimmed = body.trim();
+    if trimmed.is_empty() {
+        return false;
+    }
+    if trimmed.starts_with('_') {
+        return true;
+    }
+
+    let bytes = trimmed.as_bytes();
+    if bytes.len() < 20 {
+        return false;
+    }
+
+    let starts_with_position = matches!(bytes.first(), Some(b'!') | Some(b'='));
+    let starts_with_timestamped_position = matches!(bytes.first(), Some(b'@') | Some(b'/'));
+
+    if starts_with_position {
+        return bytes.get(8).map(|ch| ch.is_ascii_alphabetic() || ch.is_ascii_digit() || *ch == b'/' || *ch == b'\\') == Some(true)
+            && bytes.get(18) == Some(&b'_');
+    }
+
+    if starts_with_timestamped_position {
+        return bytes.get(15).map(|ch| ch.is_ascii_alphabetic() || ch.is_ascii_digit() || *ch == b'/' || *ch == b'\\') == Some(true)
+            && bytes.get(25) == Some(&b'_');
+    }
+
+    false
+}
+
+fn is_aprs_query(body: &str) -> bool {
+    let trimmed = body.trim();
+    if trimmed.is_empty() {
+        return false;
+    }
+    if trimmed.starts_with('?') {
+        return true;
+    }
+    trimmed.starts_with(':') && extract_aprs_message_text(trimmed).trim().starts_with('?')
+}
+
+fn is_aprs_bulletin(body: &str) -> bool {
+    let trimmed = body.trim();
+    let upper = trimmed.to_uppercase();
+    upper.starts_with(":BLN") && upper.chars().nth(10) == Some(':')
+}
+
+#[derive(Clone)]
+pub struct NormalizedReceivedFields {
+    pub from: String,
+    pub to: Option<String>,
+    pub body: String,
+    pub aprs_type: String,
+    pub is_bulletin: bool,
+    pub mic_e_decoded: bool,
+    pub summary_source: String,
+    pub summary_destination: Option<String>,
+}
+
+/// Input struct for `normalize_received_fields`. Use `..Default::default()`
+/// for the four `existing_*` fields when starting from scratch.
+#[derive(Default)]
+pub struct NormalizeFieldsInput<'a> {
+    pub source: Option<&'a str>,
+    pub destination: Option<&'a str>,
+    pub raw_body: &'a str,
+    pub protocol_source: Option<&'a str>,
+    pub protocol_destination: Option<&'a str>,
+    pub protocol_info_text: Option<&'a str>,
+    pub mic_e_text: Option<&'a str>,
+    pub existing_to: Option<&'a str>,
+    pub existing_aprs_type: Option<&'a str>,
+    pub existing_is_bulletin: Option<bool>,
+    pub existing_mic_e_decoded: Option<bool>,
+}
+
+pub fn normalize_received_fields(input: NormalizeFieldsInput) -> NormalizedReceivedFields {
+    let NormalizeFieldsInput {
+        source,
+        destination,
+        raw_body,
+        protocol_source,
+        protocol_destination,
+        protocol_info_text,
+        mic_e_text,
+        existing_to,
+        existing_aprs_type,
+        existing_is_bulletin,
+        existing_mic_e_decoded,
+    } = input;
+    let protocol_body = protocol_info_text
+        .or_else(|| unwrap_third_party_info(raw_body))
+        .unwrap_or(raw_body);
+
+    let from = protocol_source.or(source).unwrap_or("?").to_string();
+    let body = mic_e_text
+        .filter(|text| !text.trim().is_empty())
+        .map(ToString::to_string)
+        .unwrap_or_else(|| extract_aprs_display_body(raw_body));
+    let to = existing_to.map(ToString::to_string).or_else(|| parse_received_addressee(protocol_body));
+    let aprs_type = existing_aprs_type.map(ToString::to_string).unwrap_or_else(|| {
+        if is_aprs_telemetry_metadata(protocol_body) {
+            "tlm".to_string()
+        } else if is_aprs_weather_report(protocol_body) {
+            "wx".to_string()
+        } else if is_aprs_query(protocol_body) {
+            "qry".to_string()
+        } else {
+            aprs_frame_type(protocol_body).to_string()
+        }
+    });
+    let is_bulletin = existing_is_bulletin.unwrap_or_else(|| is_aprs_bulletin(protocol_body));
+    let mic_e_decoded = existing_mic_e_decoded.unwrap_or_else(|| mic_e_text.is_some_and(|text| !text.trim().is_empty()));
+
+    NormalizedReceivedFields {
+        from,
+        to,
+        body,
+        aprs_type,
+        is_bulletin,
+        mic_e_decoded,
+        summary_source: protocol_source.or(source).unwrap_or("?").to_string(),
+        summary_destination: protocol_destination.or(destination).map(ToString::to_string),
+    }
+}
+
+fn normalize_received_message(mut message: Value) -> Value {
+    let Some(obj) = message.as_object_mut() else {
+        return message;
+    };
+
+    let raw_body = obj
+        .get("protocol_info_text")
+        .and_then(Value::as_str)
+        .or_else(|| obj.get("info_text").and_then(Value::as_str))
+        .or_else(|| obj.get("body").and_then(Value::as_str))
+        .or_else(|| obj.get("text").and_then(Value::as_str))
+        .unwrap_or("");
+    let normalized = normalize_received_fields(NormalizeFieldsInput {
+        source: obj.get("source").and_then(Value::as_str),
+        destination: obj.get("destination").and_then(Value::as_str),
+        raw_body,
+        protocol_source: obj.get("protocol_source").and_then(Value::as_str),
+        protocol_destination: obj.get("protocol_destination").and_then(Value::as_str),
+        protocol_info_text: obj.get("protocol_info_text").and_then(Value::as_str),
+        mic_e_text: obj.get("mic_e_text").and_then(Value::as_str),
+        existing_to: obj.get("to").and_then(Value::as_str),
+        existing_aprs_type: obj.get("aprsType").and_then(Value::as_str),
+        existing_is_bulletin: obj.get("isBulletin").and_then(Value::as_bool),
+        existing_mic_e_decoded: obj.get("micEDecoded").and_then(Value::as_bool),
+    });
+
+    obj.insert("from".to_string(), Value::String(normalized.from));
+    if let Some(to) = normalized.to {
+        obj.insert("to".to_string(), Value::String(to));
+    }
+    obj.insert("body".to_string(), Value::String(normalized.body));
+    obj.insert("aprsType".to_string(), Value::String(normalized.aprs_type));
+    obj.insert("isBulletin".to_string(), Value::Bool(normalized.is_bulletin));
+    obj.insert("micEDecoded".to_string(), Value::Bool(normalized.mic_e_decoded));
+
+    message
+}
+
+fn normalize_received_messages(messages: Vec<Value>) -> Vec<Value> {
+    messages.into_iter().map(normalize_received_message).collect()
+}
+
+#[tauri::command]
+pub fn load_settings(app: AppHandle) -> AppSettings {
+    if let Some(cached) = settings_cache().read().unwrap().as_ref() {
+        return cached.clone();
+    }
+
+    let settings = load_settings_from_disk(&app);
+    *settings_cache().write().unwrap() = Some(settings.clone());
+    settings
+}
+
+fn load_settings_from_disk(app: &AppHandle) -> AppSettings {
+    let path = match settings_path(app) {
+        Ok(p) => p,
+        Err(_) => return AppSettings::default(),
+    };
+
+    if !path.exists() {
+        return AppSettings::default();
+    }
+
+    let raw = match fs::read_to_string(&path) {
+        Ok(s) => s,
+        Err(_) => return AppSettings::default(),
+    };
+
+    serde_json::from_str::<AppSettings>(&raw).unwrap_or_default()
+}
+
+/// Save settings with merge semantics: the payload may be a partial object;
+/// keys it omits keep their current values instead of resetting to defaults.
+/// This makes settings saves from different UIs (main window, Preferences,
+/// web remote) safe to interleave — a client that doesn't know about a field
+/// can't clobber it.
+#[tauri::command]
+pub fn save_settings(app: AppHandle, settings: serde_json::Value) -> Result<(), String> {
+    let mut merged = serde_json::to_value(load_settings(app.clone()))
+        .map_err(|err| format!("failed to serialize current settings: {err}"))?;
+
+    let (Some(base), Some(patch)) = (merged.as_object_mut(), settings.as_object()) else {
+        return Err("settings payload must be a JSON object".to_string());
+    };
+    for (key, value) in patch {
+        base.insert(key.clone(), value.clone());
+    }
+
+    let merged_settings: AppSettings = serde_json::from_value(merged)
+        .map_err(|err| format!("invalid settings payload: {err}"))?;
+
+    let path = settings_path(&app)?;
+    let json = serde_json::to_string_pretty(&merged_settings)
+        .map_err(|err| format!("failed to serialize settings: {err}"))?;
+    fs::write(&path, json).map_err(|err| format!("failed to write settings file: {err}"))?;
+    // Only cache after a successful write so the cache never diverges from disk.
+    *settings_cache().write().unwrap() = Some(merged_settings.clone());
+    app.emit("settings_updated", merged_settings)
+        .map_err(|err| format!("failed to broadcast settings update: {err}"))
+}
+
+#[tauri::command]
+pub fn load_received_messages(app: AppHandle) -> Vec<serde_json::Value> {
+    if let Some(cached) = received_cache().read().unwrap().as_ref() {
+        return cached.clone();
+    }
+
+    let messages = load_received_from_disk(&app);
+    *received_cache().write().unwrap() = Some(messages.clone());
+    messages
+}
+
+fn load_received_from_disk(app: &AppHandle) -> Vec<serde_json::Value> {
+    let dir = match app.path().app_data_dir() {
+        Ok(d) => d,
+        Err(_) => return Vec::new(),
+    };
+    let path = dir.join(RECEIVED_MESSAGES_FILE);
+    if !path.exists() {
+        return Vec::new();
+    }
+    let raw = match fs::read_to_string(&path) {
+        Ok(s) => s,
+        Err(_) => return Vec::new(),
+    };
+    let mut messages = normalize_received_messages(
+        serde_json::from_str::<Vec<serde_json::Value>>(&raw).unwrap_or_default(),
+    );
+    messages.truncate(MAX_RECEIVED_MESSAGES);
+    messages
+}
+
+/// Ensure the in-memory received store is populated from disk (first use).
+fn ensure_received_cache(app: &AppHandle) {
+    if received_cache().read().unwrap().is_some() {
+        return;
+    }
+    let loaded = load_received_from_disk(app);
+    let mut guard = received_cache().write().unwrap();
+    if guard.is_none() {
+        *guard = Some(loaded);
+    }
+}
+
+#[tauri::command]
+pub fn save_received_messages(
+    app: AppHandle,
+    mut messages: Vec<serde_json::Value>,
+) -> Result<(), String> {
+    let dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|err| format!("failed to resolve app data directory: {err}"))?;
+    fs::create_dir_all(&dir)
+        .map_err(|err| format!("failed to create app data directory: {err}"))?;
+    messages = normalize_received_messages(messages);
+    messages.truncate(MAX_RECEIVED_MESSAGES);
+    *received_cache().write().unwrap() = Some(messages.clone());
+    let json = serde_json::to_string_pretty(&messages)
+        .map_err(|err| format!("failed to serialize received messages: {err}"))?;
+    fs::write(dir.join(RECEIVED_MESSAGES_FILE), json)
+        .map_err(|err| format!("failed to write received messages file: {err}"))
+}
+
+/// Append one received message. O(1) in memory; the disk flush is debounced
+/// through a single long-lived worker so a busy feed causes at most one file
+/// write per RECEIVED_FLUSH_DEBOUNCE window instead of one write per packet.
+///
+/// Trade-off: up to ~5s of received messages can be lost on an ungraceful
+/// quit (the outbound queue is intentionally non-persistent already).
+pub fn append_received_message(app: AppHandle, message: serde_json::Value) -> Result<(), String> {
+    ensure_received_cache(&app);
+    {
+        let mut guard = received_cache().write().unwrap();
+        let messages = guard.as_mut().expect("received cache initialized");
+        messages.insert(0, normalize_received_message(message));
+        messages.truncate(MAX_RECEIVED_MESSAGES);
+    }
+    schedule_received_flush(app);
+    Ok(())
+}
+
+fn schedule_received_flush(app: AppHandle) {
+    let notify = RECEIVED_FLUSH_NOTIFY.get_or_init(tokio::sync::Notify::new);
+
+    if !RECEIVED_FLUSHER_STARTED.swap(true, Ordering::SeqCst) {
+        let worker_app = app.clone();
+        tauri::async_runtime::spawn(async move {
+            let notify = RECEIVED_FLUSH_NOTIFY
+                .get()
+                .expect("flush notify initialized");
+            loop {
+                notify.notified().await;
+                // Coalesce a burst of appends into one write.
+                tokio::time::sleep(RECEIVED_FLUSH_DEBOUNCE).await;
+
+                let snapshot = received_cache().read().unwrap().clone().unwrap_or_default();
+                if let Ok(dir) = worker_app.path().app_data_dir() {
+                    if let Ok(json) = serde_json::to_string_pretty(&snapshot) {
+                        let _ = fs::write(dir.join(RECEIVED_MESSAGES_FILE), json);
+                    }
+                }
+                // Any notify that arrived during the sleep leaves a permit, so
+                // the loop wakes immediately and flushes again — no append is
+                // ever left unflushed.
+            }
+        });
+    }
+
+    notify.notify_one();
+}
+
+#[cfg(test)]
+mod tests {
+    use super::normalize_received_message;
+    use serde_json::{json, Value};
+
+    #[test]
+    fn normalize_received_message_uses_protocol_fields_for_wrapped_packets() {
+        let value = json!({
+            "text": "WZ0C-4>APN20H:}WHO-IS>APJIW4,TCPIP,WZ0C-4*::WT1W-15  :?APRSP",
+            "source": "WZ0C-4",
+            "destination": "APN20H",
+            "path": ["WIDE1-1"],
+            "info_text": "}WHO-IS>APJIW4,TCPIP,WZ0C-4*::WT1W-15  :?APRSP",
+            "protocol_source": "WHO-IS",
+            "protocol_destination": "APJIW4",
+            "protocol_path": ["TCPIP", "WZ0C-4*"],
+            "protocol_info_text": ":WT1W-15  :?APRSP"
+        });
+
+        let normalized = normalize_received_message(value);
+        assert_eq!(normalized.get("from").and_then(Value::as_str), Some("WHO-IS"));
+        assert_eq!(normalized.get("to").and_then(Value::as_str), Some("WT1W-15"));
+        assert_eq!(normalized.get("body").and_then(Value::as_str), Some("?APRSP"));
+        assert_eq!(normalized.get("aprsType").and_then(Value::as_str), Some("qry"));
+    }
+
+    #[test]
+    fn normalize_received_message_strips_reply_ack_suffix_from_ack_display() {
+        let value = json!({
+            "body": ":WT1W-15  :ack12}34"
+        });
+
+        let normalized = normalize_received_message(value);
+        assert_eq!(normalized.get("body").and_then(Value::as_str), Some("ack12"));
+    }
+
+    #[test]
+    fn normalize_received_message_tolerates_parenthesis_reply_ack_delimiter() {
+        let value = json!({
+            "body": ":WT1W-15  :ack14)61"
+        });
+
+        let normalized = normalize_received_message(value);
+        assert_eq!(normalized.get("body").and_then(Value::as_str), Some("ack14"));
+    }
+}

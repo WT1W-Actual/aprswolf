@@ -1,0 +1,379 @@
+# APRSWolf Developer Guide
+
+> If you're reading this after a 6-month gap: start here, not in the source code.
+> This document is the handoff from the last person who deeply understood this codebase.
+> Read it before you change anything.
+
+## Table of Contents
+
+1. [Quick Start](#quick-start)
+2. [Project Architecture](#project-architecture)
+3. [Codebase Map](#codebase-map)
+4. [Key Design Decisions & Patterns](#key-design-decisions--patterns)
+5. [Ponytail Audit — What Was Fixed & Why](#ponytail-audit--what-was-fixed--why)
+6. [Common Pitfalls (Don't Repeat These)](#common-pitfalls-dont-repeat-these)
+7. [Mac App Store Gotchas](#mac-app-store-gotchas)
+8. [Future Cross-Platform Notes](#future-cross-platform-notes)
+9. [Build & Release](#build--release)
+
+---
+
+## Quick Start
+
+```bash
+# Dependencies
+npm install
+source ~/.cargo/env   # if cargo is missing in a fresh shell
+
+# Dev mode (Tauri + Vite, hot-reloads both frontend and Rust)
+npm run play
+
+# Just the frontend (faster iteration on UI)
+npm run dev
+
+# Full type check + compile
+npm run build
+
+# Tests
+npm run test          # frontend (Vitest)
+cd src-tauri && cargo test    # backend (Rust)
+cd src-tauri && cargo check   # backend compile check only
+
+# Release (current target: macOS only)
+npm run release:macos:universal
+```
+
+## Project Architecture
+
+APRSWolf is a **Tauri v2 + React (TypeScript)** desktop app — a single macOS `.app` bundle with a Rust backend and a web-based frontend rendered by the system WebView (WKWebView on macOS).
+
+```
+┌─────────────────────────────────────────────────┐
+│                  System WebView                  │
+│  ┌───────────────────────────────────────────┐  │
+│  │         React (TypeScript) Frontend       │  │
+│  │  src/App.tsx          src/*Window.tsx     │  │
+│  │  src/lib/types.ts     src/lib/helpers.ts  │  │
+│  │  src/lib/useTheme.ts  src/logBus.ts       │  │
+│  └──────────────────────┬────────────────────┘  │
+│                         │ Tauri IPC (invoke)     │
+│  ┌──────────────────────▼────────────────────┐  │
+│  │           Rust Backend (Tauri)            │  │
+│  │  src-tauri/src/lib.rs  (entry + commands) │  │
+│  │  src-tauri/src/runtime.rs  (app state)    │  │
+│  │  src-tauri/src/tnc.rs, agw.rs, kiss.rs    │  │
+│  │  src-tauri/src/aprsis.rs, ax25.rs         │  │
+│  │  src-tauri/src/settings.rs                │  │
+│  │  src-tauri/src/webserver.rs               │  │
+│  └──────────────────────────────────────────┘  │
+└─────────────────────────────────────────────────┘
+```
+
+### Communication Model
+
+- **Frontend → Backend**: Tauri `invoke("command_name", { ...args })` calls. Each command is a `#[tauri::command]` function in `lib.rs` or `runtime.rs`. Payloads are JSON-serialized structs.
+- **Backend → Frontend**: Tauri events via `app_handle.emit("event_name", payload)`. The frontend subscribes with `listen("event_name", callback)`.
+- **Frontend ↔ Frontend**: Cross-window communication uses a lightweight event bus (`src/logBus.ts`, `src/receivedBus.ts`) — a simple typed subscriber pattern, not Redux/Zustand.
+
+### The Two Sides Have Different Conventions
+
+| Concern | Frontend (TypeScript) | Backend (Rust) |
+|---------|----------------------|-----------------|
+| Settings field names | `snake_case` (Tauri IPC serializes to Rust structs) | `snake_case` |
+| Internal variable names | `camelCase` in helper params | `snake_case` |
+| Source of truth for display | Frontend (formatting happens here) | Raw data, unformatted |
+| Connection state | Display-only (read from events) | Authoritative (owns TNC/APRS-IS connections) |
+
+## Codebase Map
+
+### Frontend (`src/`)
+
+| File | Purpose | ~LOC | Notes |
+|------|---------|------|-------|
+| `App.tsx` | Main application component — message composer, sent pane, connection controls, settings panel | 1,500 | The god file. Consider splitting if it grows much more. |
+| `ReceivedWindow.tsx` | Popped-out received messages window (filter + reply) | — | Opened from App.tsx's button |
+| `PreferencesWindow.tsx` | macOS-style preferences (settings, theme, sound, beacon) | — | Save uses `buildSettingsPayload()` |
+| `HelpWindow.tsx` | In-app help browser with sidebar navigation & search | — | Content in `helpContent.ts` |
+| `LogWindow.tsx` | Traffic log panel | — | Uses `useTheme()` (one-shot) |
+| `main.tsx` | React entry point, window creation | — | Thin wrapper |
+
+### Frontend Libraries (`src/lib/`)
+
+| File | Purpose | Notes |
+|------|---------|-------|
+| `types.ts` | Shared type definitions and constants | **Single source of truth** for `AppSettingsPayload`, `ThemeMode`, `ReceivedFilter`, `FILTER_OPTIONS`. Imported by multiple windows — never duplicate these types. |
+| `helpers.ts` | Utility functions | `buildSettingsPayload()`, `deriveAprsIsPasscode()`, input normalisers, `nextId()`, message helpers |
+| `useTheme.ts` | Shared theme hook | Two modes: **reactive** (pass `themeMode` prop) or **one-shot** (loads from backend). Includes `prefers-color-scheme` listener. |
+
+**Why these libraries exist:** The Ponytail audit found `AppSettingsPayload` defined identically in 3 files, and the same settings payload constructed inline in 3 different places. Extracting them eliminated drift and cut ~50 lines of duplicated code.
+
+### Frontend Event Buses
+
+| File | Purpose |
+|------|---------|
+| `logBus.ts` | Typed pub/sub for log/message events between components |
+| `receivedBus.ts` | Typed pub/sub for received message events |
+
+These are *window-local* buses, not cross-window. Cross-window state is managed through Tauri events (Rust backend broadcasts to all windows).
+
+### Backend (`src-tauri/src/`)
+
+| File | Purpose | ~LOC |
+|------|---------|------|
+| `main.rs` | Tauri app entry point | Small |
+| `lib.rs` | Command handlers + `tauri::Builder` setup | Medium |
+| `runtime.rs` | Application state (`RuntimeState`), shared runtime data | ~300 |
+| `tnc.rs` | KISS TNC connection management | — |
+| `agw.rs` | AGW TCP protocol handler | — |
+| `kiss.rs` | KISS framing encode/decode | — |
+| `aprsis.rs` | APRS-IS connection over TCP | — |
+| `ax25.rs` | AX.25 frame parsing and construction | — |
+| `settings.rs` | Settings load/save (JSON file in app data dir) | — |
+| `webserver.rs` | Embedded web server for remote control interface | — |
+| `main.rs` | `fn main()` — starts the Tauri app | 5 lines |
+
+### Remote Control (`src-tauri/`)
+
+The remote web control is **not a React app** — it's a standalone HTML file served by the embedded Rust web server:
+
+| File | Purpose |
+|------|---------|
+| `src-tauri/remote-control.html` | Phone-friendly dashboard for remote monitoring | ~400 LOC |
+
+This was extracted from a 1,600-line inline string inside `webserver.rs` — it used to be embedded as a Rust string literal. Extracting it made the HTML editable without recompiling Rust, and let us trim 75% of dead code.
+
+## Key Design Decisions & Patterns
+
+### 1. Settings Payload Construction
+
+**Always use `buildSettingsPayload()`** from `src/lib/helpers.ts`. Never construct the payload inline.
+
+```typescript
+import { buildSettingsPayload } from "./lib/helpers";
+
+const payload = buildSettingsPayload({
+  source: "user",
+  path: "/dev/ttyUSB0",
+  host: "localhost",
+  port: "8001",
+  // ... all settings as camelCase
+});
+
+await invoke("save_settings", { settings: payload });
+```
+
+The builder function:
+- Accepts clean **camelCase** params
+- Returns **snake_case** payload (matching Rust struct fields)
+- Applies defaults via `??` nullish coalescing
+- Is the **single source of truth** for field name mapping
+
+**Why:** Three different components (auto-save in App.tsx, manual save in App.tsx, PreferencesWindow) each built the same payload with different conventions. One had defaults, one didn't. They drifted. This centralizes it.
+
+### 2. Shared Types
+
+**All cross-component types live in `src/lib/types.ts`.** If you're defining a type that's imported from more than one file, it goes here.
+
+Current exports:
+- `ThemeMode` — `"system" | "light" | "dark"`
+- `AppSettingsPayload` — the full backend settings struct
+- `ReceivedFilter` — union type of all filter categories
+- `FILTER_OPTIONS` — display-friendly array of filter choices
+
+**Never** re-declare `AppSettingsPayload` or `ReceivedFilter` in a component file. Import them:
+```typescript
+import { type AppSettingsPayload, type ReceivedFilter, FILTER_OPTIONS } from "./lib/types";
+```
+
+**Why:** When `PreferencesWindow.tsx`, `ReceivedWindow.tsx`, and `App.tsx` each defined the same type verbatim, adding a field meant updating 3 files. They inevitably drifted. Now it's one file.
+
+### 3. Theme Hook
+
+Use `useTheme()` from `src/lib/useTheme.ts` instead of inline `useEffect` for theme management.
+
+**Two modes:**
+
+```typescript
+// One-shot (loads from backend on mount) — for secondary windows
+useTheme();
+
+// Reactive (prop-driven, re-applies on change) — for preferences window
+useTheme(themeMode);
+```
+
+The hook handles:
+- Applying `data-theme` attribute to `<html>`
+- Listening to `prefers-color-scheme` media query when mode is `"system"`
+- Cleaning up listeners on unmount
+- Loading saved theme from backend in one-shot mode
+
+**Why:** Three secondary windows had the same `useEffect` for theme loading. The hook eliminated ~30 lines of duplicated effect code and made all windows consistent.
+
+### 4. Remote Control HTML
+
+The remote web control (`remote-control.html`) is a **standalone HTML file**, not a React component. It's served by the Rust web server as a static page.
+
+**Rules for editing it:**
+- It's served raw — no bundler, no TypeScript, no JSX. Write plain ES6+ JS and CSS.
+- It talks to the Rust backend via `fetch()` calls to `http://localhost:{port}/api/...`
+- Keep it thin — it's a monitoring dashboard, not a full APRS client.
+- If it needs significant new functionality, consider a separate React build pipeline for it (but that's a lot of complexity for what should remain a simple dashboard).
+
+### 5. Console Logging
+
+Debug logging uses a `pushLog()` function that routes to both the UI event bus and the developer console:
+
+```typescript
+function pushLog(kind: LogItem["kind"], text: string) {
+  publishUiLog(kind, text);           // always — drives the TUI log panel
+  if (import.meta.env.DEV) {
+    console.log(`[${kind.toUpperCase()}] ${text}`);  // dev only
+  }
+}
+```
+
+The `console.log` is gated behind `import.meta.env.DEV` — Vite tree-shakes it in production builds. **Do not add bare `console.log()` calls outside this guard.**
+
+### 6. Monotonic IDs
+
+Use `nextId()` from `helpers.ts` for any ID that needs to be unique within a session. It's a simple incrementing counter — not UUIDs, not timestamps. Works because Tauri windows share a process.
+
+### 7. APRS-IS Passcode Derivation
+
+Built into `helpers.ts` as `deriveAprsIsPasscode(callsign)` — this is the standard APRS-IS passcode algorithm. It's duplicated on the Rust side too; keep both in sync if the algorithm changes (unlikely — it's a published standard).
+
+## Ponytail Audit — What Was Fixed & Why
+
+This audit was run on 2026-06-17 by the Ponytail plugin. The findings below are the permanent record so nobody re-introduces these patterns.
+
+### Finding 1: Large embedded HTML resource in Rust source
+
+**What:** 1,610-line HTML/JS/CSS app embedded as a `r##"..."##` string literal in `webserver.rs`.
+
+**Fix:** Extracted to `src-tauri/remote-control.html`, trimmed to ~400 lines. The extracted file is loaded at runtime with `include_str!()`.
+
+**Why:** An inline 1,600-line string makes the Rust file unreadable, breaks syntax highlighting, and requires a Rust recompile for any HTML change.
+
+**Don't re-introduce:** Never embed more than ~20 lines of HTML/JS in Rust. If the remote control needs significant new features, it gets added to the HTML file.
+
+### Finding 2: Duplicated `format_display_version` in Rust + TypeScript
+
+**What:** The same display version formatting logic existed in both `webserver.rs` (Rust) and `App.tsx` (TypeScript), doing identical transformations on raw version strings.
+
+**Fix:** Removed the Rust copy. The web server sends raw version data; both the desktop app and remote HTML page format it client-side.
+
+**Why:** Two sources of truth drift. The frontend renders the data, so the formatting belongs there.
+
+**Don't re-introduce:** The Rust backend sends raw values. All display formatting belongs in TypeScript. If you add a new API endpoint to the web server, return raw data, not formatted strings.
+
+### Finding 3: Duplicated theme `useEffect` across three windows
+
+**What:** `HelpWindow.tsx`, `LogWindow.tsx`, and `ReceivedWindow.tsx` each had an identical `useEffect` for loading theme settings and applying the `data-theme` attribute. `PreferencesWindow.tsx` had a reactive variant that also watched for theme changes.
+
+**Fix:** Extracted to `src/lib/useTheme.ts` with two modes (one-shot and reactive).
+
+**Why:** The boilerplate was identical in 4 files. The hook centralizes the `prefers-color-scheme` listener logic and makes it impossible for a new window to get the theme wrong.
+
+**Don't re-introduce:** Any new window that needs theme support should call `useTheme()`. Period.
+
+### Finding 4: Inline settings payload construction in 3 places
+
+**What:** Auto-save in `App.tsx`, manual save in `App.tsx`, and `PreferencesWindow.tsx` each built the `{ settings: {...} }` payload inline, with different default values and field naming conventions.
+
+**Fix:** Created `buildSettingsPayload()` in `src/lib/helpers.ts` — the single function that maps camelCase params to snake_case payload with consistent defaults.
+
+**See:** [Key Decision #1](#1-settings-payload-construction)
+
+### Finding 5: Duplicated type definitions in 3 files
+
+**What:** `AppSettingsPayload` defined identically in `App.tsx`, `PreferencesWindow.tsx`, and `ReceivedWindow.tsx`. Same for `ReceivedFilter`/`FILTER_OPTIONS`.
+
+**Fix:** Consolidated to `src/lib/types.ts`.
+
+**See:** [Key Decision #2](#2-shared-types)
+
+### Finding 6: Production `console.log` in pushLog
+
+**What:** `pushLog()` called `console.log()` on every log call, even in production builds, cluttering terminal output.
+
+**Fix:** Wrapped in `if (import.meta.env.DEV)`.
+
+**See:** [Key Decision #5](#5-console-logging)
+
+## Common Pitfalls (Don't Repeat These)
+
+### TypeScript / React
+
+- **Don't define the same type twice.** If a type is used in more than one file, it goes in `src/lib/types.ts`. The Ponytail audit found `AppSettingsPayload` defined verbatim in 3 files — it had already drifted once.
+- **Don't build settings payloads inline.** Use `buildSettingsPayload()`. There were 3 different inline versions with different defaults and field names. One had `true` as the auto-beacon default, another had `1500` as the interval. They were inconsistent.
+- **Don't add bare `console.log`.** Wrap it in `pushLog()` or gate with `import.meta.env.DEV`. Production builds should have zero terminal noise.
+- **Don't inline theme effects.** Use `useTheme()` from `src/lib/useTheme.ts`. Four files had the same pattern before the audit.
+- **Don't stack patches on the same file without re-reading.** If you're applying multiple `patch` calls to the same file, re-read between each one. The fuzzy matcher can misalign if surrounding context shifted.
+
+### Rust / Tauri
+
+- **Don't embed HTML strings.** `r##"..."##` is not a file format. Anything over 20 lines goes in a separate file loaded with `include_str!()`.
+- **Don't format data in the backend.** The Rust side returns raw values. Formatting belongs in the frontend. If the same data goes to the web server, the HTML page formats it client-side with JS.
+- **Don't duplicate window size config.** Tauri applies `tauri.conf.json` size settings automatically. Adding a `set_size()` call in `setup()` with the same values is dead code. Only override sizes in Rust when you need dynamic sizing.
+- **The Rust side uses `Mutex<RuntimeStateInner>` pattern** (single mutex for the whole state struct), not per-field `Arc<Mutex<T>>`. If you add a new field to `RuntimeState`, add it as a plain field to the inner struct and access it through the single lock. This is by design — simpler API, lower overhead, and fields are nearly always read together anyway.
+
+### Cross-Window
+
+- **Tauri v2 IPC `invoke` with no args:** pass `{}` explicitly as the args parameter. Passing nothing or `undefined` may fail silently or return stale data.
+- **Cross-window state:** Don't try to sync a React state store across windows. Use Tauri events from the backend — the backend is the authoritative state owner, and it broadcasts to all windows.
+
+## Mac App Store Gotchas
+
+- **Code signing is mandatory.** The universal DMG build produces an unsigned bundle. You need an Apple Developer ID certificate and must run `codesign` after the `lipo` merge step.
+- **Notarization required.** After signing, submit to Apple for notarization before distribution.
+- **Sandbox entitlements.** The Mac App Store requires sandboxing. APRSWolf's TNC access (network connections to Dire Wolf) and file I/O (settings persistence) will need explicit entitlements. Map these carefully — the networking entitlements for TNC TCP access must allow arbitrary TCP connections to localhost devices.
+- **Tauri v2 + Mac App Store** has known quirks. Test the sandboxed build thoroughly before submission. Key areas: file access (settings), network access (TNC, APRS-IS), and webview behavior under sandbox.
+
+## Future Cross-Platform Notes
+
+### Windows
+
+- **PTY differences:** No UNIX pseudoterminals. KISS TCP connection logic should be portable, but test TCPServer bind behavior on Windows.
+- **Tauri v2 Windows support** is mature. The main effort is UI layout testing — React components are portable, but WKWebView vs WebView2 render differently.
+- **Directory paths:** Rust's `dirs` crate handles this, but verify settings file locations on Windows.
+- **Package with WiX or MSI** — Tauri supports both. MSI is more modern.
+
+### Linux
+
+- **No built-in webview on most distros.** Tauri uses WebKitGTK. Users may need to install it: `sudo apt install libwebkit2gtk-4.1-dev`.
+- **No App Store distribution.** Package as AppImage, Flatpak, or Snap.
+- **Dire Wolf is native on Linux** — TNC mode works best here.
+- **Test on both X11 and Wayland.** Tauri v2 handles Wayland, but window positioning and sizes can differ.
+
+### General Cross-Platform
+
+- **The frontend (React/TypeScript)** is the portable part. All business logic for display, formatting, and UI lives here and works identically on all platforms.
+- **The backend (Rust/Tauri)** handles platform-specific I/O (TNC connections, file storage, system tray). Platform-specific code is isolated in `src-tauri/src/` — only `main.rs` and `lib.rs` need platform-conditional compilation.
+- **`remote-control.html`** works on any platform with a browser — it's served by the embedded web server and is fully platform-agnostic.
+
+## Build & Release
+
+See the [project README](../README.md) for quick-start commands. Full release process:
+
+```bash
+# 1. Bump version in package.json and src-tauri/Cargo.toml
+# 2. Write release notes (copy RELEASE-NOTES-TEMPLATE.md → docs/releases/X.Y.Z.md)
+# 3. Build universal macOS DMG
+npm run release:macos:universal
+# 4. Sign the .app bundle (developer cert required)
+# 5. Notarize with Apple
+# 6. DMG published at:
+#    src-tauri/target/universal-apple-darwin/release/bundle/dmg/APRSWolf_X.Y.Z_universal.dmg
+```
+
+## Version History
+
+| Version | Date | Key Changes |
+|---------|------|-------------|
+| 1.0 | 2026-05-21 | First stable release. Consolidated RX/Mic-E improvements, pop-out received window, in-app help, remote web control parity. |
+| (post-1.0) | 2026-06-17 | Code quality audit — extracted remote HTML, deduplicated types/hooks/helpers, dev logging guard. No user-facing changes. |
+
+---
+
+*Last updated: 2026-06-17 — Ponytail code audit results integrated.*
+*Next reader: you. This doc is your insurance against repeating the same bugs twice.*

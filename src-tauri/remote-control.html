@@ -1,0 +1,418 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>APRSWolf Remote</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --bg: #ececec;
+      --panel: rgba(255, 255, 255, 0.78);
+      --line: rgba(60, 60, 67, 0.16);
+      --text: #1d1d1f;
+      --muted: #5f626b;
+      --input-bg: rgba(255, 255, 255, 0.95);
+      --btn: #007aff;
+      --btn-hover: #0066dd;
+      --ok: #0b6f3a;
+      --warn: #7a4a0c;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #101418;
+        --panel: rgba(24, 35, 49, 0.92);
+        --line: rgba(148, 163, 184, 0.2);
+        --text: #e5edf5;
+        --muted: #9aafc2;
+        --input-bg: #0d1621;
+        --btn: #2f87ff;
+        --btn-hover: #3a90ff;
+        --ok: #7ee787;
+        --warn: #ffcc66;
+      }
+    }
+    * { box-sizing: border-box; }
+    html, body { height: 100%; margin: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Helvetica Neue", Arial, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      padding: 8px;
+    }
+    .card {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      padding: 8px 10px;
+      margin-bottom: 6px;
+    }
+    h1 { font-size: 1rem; margin: 0 0 4px; }
+    h2 { font-size: 0.7rem; margin: 0 0 4px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); }
+    .status-row { display: flex; gap: 4px; flex-wrap: wrap; margin: 4px 0; }
+    .pill {
+      padding: 3px 7px; border-radius: 999px; font-size: 0.72rem;
+      background: var(--input-bg); border: 1px solid var(--line); color: var(--muted);
+    }
+    .pill.ok { border-color: var(--ok); color: var(--ok); }
+    .pill.warn { border-color: var(--warn); color: var(--warn); }
+    .actions { display: flex; gap: 4px; flex-wrap: wrap; margin: 4px 0; }
+    button {
+      border: 1px solid transparent; border-radius: 999px; padding: 5px 10px;
+      cursor: pointer; font-weight: 600; font-size: 0.78rem;
+    }
+    button.primary { background: var(--btn); color: #fff; }
+    button.primary:hover { background: var(--btn-hover); }
+    button.secondary { background: transparent; color: var(--text); border-color: var(--line); }
+    button.danger { background: var(--warn); color: #fff; }
+    button:disabled { opacity: 0.55; cursor: default; }
+    .field-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 3px 5px; }
+    .field-grid .full { grid-column: 1 / -1; }
+    label { display: grid; gap: 2px; color: var(--muted); font-size: 0.77rem; }
+    input, select {
+      width: 100%; border-radius: 6px; border: 1px solid var(--line);
+      padding: 4px 6px; background: var(--input-bg); color: var(--text);
+      min-height: 28px; font-size: 0.82rem;
+    }
+    input:focus { outline: none; border-color: var(--btn); }
+    .note { font-size: 0.78rem; color: var(--muted); margin: 2px 0; }
+    .feedback { font-size: 0.82rem; font-weight: 600; margin: 2px 0; min-height: 1.2em; }
+    .feedback.ok { color: var(--ok); }
+    .feedback.warn { color: var(--warn); }
+    .log { display: block; max-height: 300px; overflow-y: auto; font-size: 0.75rem; }
+    .log-entry { padding: 3px 5px; border-left: 3px solid var(--line); margin: 2px 0; }
+    .log-entry.rx { border-left-color: #0ea5e9; }
+    .log-entry.tx { border-left-color: #16a34a; }
+    .log-entry.status { border-left-color: #6c757d; }
+    .log-entry.error { border-left-color: #dc2626; }
+    .log-meta { color: var(--muted); font-size: 0.65rem; text-transform: uppercase; letter-spacing: 0.03em; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>APRSWolf Remote <span id="appVersion" style="font-weight:400;font-size:0.6em;color:var(--muted)"></span></h1>
+    <p class="note">Desktop controls are locked while remote is enabled.</p>
+    <div class="status-row">
+      <span class="pill" id="tncStatus">TNC: unknown</span>
+      <span class="pill" id="aprsisStatus">APRS-IS: unknown</span>
+      <span class="pill ok" id="webStatus">Remote: enabled</span>
+    </div>
+    <div class="field-grid" style="margin-top:4px">
+      <label class="full">Remote Token <input id="remoteToken" type="password" autocomplete="off" placeholder="Required from other devices if configured in Preferences" /></label>
+    </div>
+    <div class="actions">
+      <button class="danger" id="disableRemoteBtn">Disable Remote</button>
+      <button class="secondary" id="refreshBtn">Refresh</button>
+    </div>
+    <p class="feedback" id="feedback"></p>
+  </div>
+
+  <div class="card">
+    <h2>Station</h2>
+    <div class="field-grid">
+      <label>Callsign <input id="source" /></label>
+      <label>Digi Path <input id="path" /></label>
+      <label>Beacon Lat <input id="beaconLat" /></label>
+      <label>Beacon Lon <input id="beaconLon" /></label>
+      <label>Symbol <input id="beaconSymbol" maxlength="2" /></label>
+      <label>Port <input id="webServerPort" /></label>
+    </div>
+    <div class="actions">
+      <button class="primary" id="saveSettingsBtn">Save</button>
+      <span id="saveStatus" class="note" style="margin-left:4px"></span>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>TNC</h2>
+    <p class="note" id="tncPanelStatus">Status: Disconnected</p>
+    <div class="field-grid">
+      <label class="full">Host <input id="host" /></label>
+      <label class="full">Port <input id="port" /></label>
+    </div>
+    <div class="actions">
+      <button class="primary" id="connectTncBtn">Connect</button>
+      <button class="secondary" id="disconnectTncBtn">Disconnect</button>
+      <button class="secondary" id="clearQueueBtn">Clear Queue</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>APRS-IS</h2>
+    <p class="note" id="aprsisPanelStatus">Status: Disconnected</p>
+    <div class="field-grid">
+      <label class="full">Server <input id="aprsisHost" /></label>
+      <label>Port <input id="aprsisPort" /></label>
+      <label>Passcode <input id="aprsisPasscode" /></label>
+      <label class="full">Filter <input id="aprsisFilter" placeholder="Optional (e.g. m/50, r/42.36/-71.06/25)" /></label>
+    </div>
+    <div class="actions">
+      <button class="primary" id="connectAprsIsBtn">Connect</button>
+      <button class="secondary" id="disconnectAprsIsBtn">Disconnect</button>
+    </div>
+    <p class="note">TNC &amp; APRS-IS are mutually exclusive. Direct APRS-IS sends ignore RF path.</p>
+  </div>
+
+  <div class="card">
+    <h2>Send</h2>
+    <div class="field-grid">
+      <label class="full">To <input id="destination" /></label>
+      <label class="full">Message <input id="message" maxlength="67" /></label>
+    </div>
+    <div class="actions">
+      <button class="primary" id="sendMessageBtn">Send Message</button>
+      <button class="primary" id="sendBeaconBtn">Send Beacon</button>
+      <span class="note" id="beaconCooldown"></span>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Activity Log</h2>
+    <div class="log" id="activityList"></div>
+  </div>
+
+  <script>
+    const $ = (id) => document.getElementById(id);
+    const MAX_LOG = 80;
+    let entries = [];
+
+    function escapeHtml(v) {
+      return String(v ?? "").replaceAll("&","&amp;").replaceAll("<","&lt;").replaceAll(">","&gt;").replaceAll('"',"&quot;");
+    }
+
+    function clock() { return new Date().toLocaleTimeString(); }
+
+    function pushLog(kind, text) {
+      entries = [{id:Date.now(), at:clock(), kind, text}, ...entries].slice(0, MAX_LOG);
+      renderLog();
+    }
+
+    function renderLog() {
+      const el = $("activityList");
+      el.innerHTML = entries.length === 0
+        ? '<p class="note">No activity yet.</p>'
+        : entries.map(e => `<div class="log-entry ${e.kind}"><span class="log-meta">${escapeHtml(e.kind)} @ ${escapeHtml(e.at)}</span><br>${escapeHtml(e.text)}</div>`).join("");
+    }
+
+    function setValueIfIdle(id, v) {
+      const el = $(id);
+      if (el && document.activeElement !== el) el.value = v ?? "";
+    }
+
+    function setFeedback(msg, kind) {
+      const el = $("feedback");
+      el.textContent = msg || "";
+      el.className = "feedback" + (kind ? " " + kind : "");
+    }
+
+    function setSavedStatus(msg) { $("saveStatus").textContent = msg || ""; }
+
+    function normalizeCall(s) {
+      return (s || "").replace(/-.*$/, "").toUpperCase().slice(0, 9);
+    }
+
+    function derivePasscode(call) {
+      let h = 0x73e2;
+      for (let i = 0; i < call.length; i++) {
+        const c = call.charCodeAt(i);
+        h = ((h << 8) ^ ((h >> 8) & 0xff) ^ (c & 0xff)) & 0xffff;
+        h = ((h << 8) ^ ((h >> 8) & 0xff) ^ ((c >> 8) & 0xff)) & 0xffff;
+      }
+      return (h & 0x7fff).toString();
+    }
+
+    function getToken() { return localStorage.getItem("aprswolf_remote_token") || ""; }
+
+    async function api(method, path, body) {
+      const headers = {"Content-Type":"application/json"};
+      const token = getToken();
+      if (token) headers["Authorization"] = "Bearer " + token;
+      const opts = { method, headers };
+      if (body) opts.body = JSON.stringify(body);
+      const r = await fetch(path, opts);
+      if (r.status === 401) throw new Error("Unauthorized — enter the remote token above");
+      const data = r.status === 204 ? {} : await r.json();
+      if (!r.ok) throw new Error(data.error || `HTTP ${r.status}`);
+      return data;
+    }
+
+    async function refresh() {
+      try {
+        const s = await api("GET", "/api/state");
+        setValueIfIdle("source", s.settings.source);
+        setValueIfIdle("path", s.settings.path);
+        setValueIfIdle("beaconLat", s.settings.beacon_lat);
+        setValueIfIdle("beaconLon", s.settings.beacon_lon);
+        setValueIfIdle("beaconSymbol", s.settings.beacon_symbol);
+        setValueIfIdle("webServerPort", s.web_server.port);
+        setValueIfIdle("host", s.settings.host);
+        setValueIfIdle("port", s.settings.port);
+        setValueIfIdle("aprsisHost", s.settings.aprsis_host);
+        setValueIfIdle("aprsisPort", s.settings.aprsis_port);
+        setValueIfIdle("aprsisPasscode", s.settings.aprsis_passcode);
+        setValueIfIdle("aprsisFilter", s.settings.aprsis_filter);
+        setValueIfIdle("appVersion", s.app_version);
+
+        function statusPill(id, connected, label) {
+          const el = $(id);
+          el.textContent = `${label}: ${connected ? "Connected" : "Disconnected"}`;
+          el.className = "pill " + (connected ? "ok" : "");
+        }
+        statusPill("tncStatus", s.runtime.tnc_connected, "TNC");
+        statusPill("aprsisStatus", s.runtime.aprsis_connected, "APRS-IS");
+
+        function panelStatus(id, connected, label) {
+          const el = $(id);
+          el.textContent = `Status: ${connected ? "Connected" : "Disconnected"}`;
+          el.style.color = connected ? "var(--ok)" : "var(--muted)";
+        }
+        panelStatus("tncPanelStatus", s.runtime.tnc_connected, "TNC");
+        panelStatus("aprsisPanelStatus", s.runtime.aprsis_connected, "APRS-IS");
+
+        if (s.manual_beacon_cooldown_remaining_sec > 0) {
+          startBeaconCooldown(s.manual_beacon_cooldown_remaining_sec);
+        }
+      } catch (e) {
+        setFeedback(e.message || String(e), "warn");
+        pushLog("error", "Refresh failed: " + (e.message || String(e)));
+      }
+    }
+
+    let beaconCooldownValue = 0;
+    let beaconCooldownTimer = null;
+    function startBeaconCooldown(sec) {
+      if (beaconCooldownTimer) { clearInterval(beaconCooldownTimer); }
+      beaconCooldownValue = sec;
+      if (beaconCooldownValue <= 0) return;
+      $("sendBeaconBtn").disabled = true;
+      beaconCooldownTimer = setInterval(() => {
+        beaconCooldownValue -= 1;
+        if (beaconCooldownValue <= 0) {
+          clearInterval(beaconCooldownTimer);
+          beaconCooldownTimer = null;
+          $("beaconCooldown").textContent = "";
+          $("sendBeaconBtn").disabled = false;
+        } else {
+          const m = Math.floor(beaconCooldownValue / 60);
+          const s = beaconCooldownValue % 60;
+          $("beaconCooldown").textContent = `Reset in ${m}:${String(s).padStart(2, "0")}`;
+        }
+      }, 1000);
+    }
+
+    $("disableRemoteBtn").addEventListener("click", async () => {
+      try {
+        await api("POST", "/api/disable");
+        setFeedback("Remote disabled. You can re-enable from the desktop app.", "ok");
+        document.body.innerHTML = '<div class="card" style="margin-top:40px;text-align:center"><h1>Remote Disabled</h1><p class="note">Re-enable from the APRSWolf desktop app.</p></div>';
+      } catch (e) { setFeedback(e.message, "warn"); }
+    });
+
+    $("refreshBtn").addEventListener("click", () => refresh().catch(() => {}));
+
+    $("saveSettingsBtn").addEventListener("click", async () => {
+      try {
+        const r = await api("POST", "/api/save-settings", {
+          callsign: $("source").value,
+          path: $("path").value,
+          beacon_latitude: $("beaconLat").value,
+          beacon_longitude: $("beaconLon").value,
+          beacon_symbol: $("beaconSymbol").value,
+          tnc_host: $("host").value,
+          tnc_port: parseInt($("port").value) || 8000,
+          aprsis_host: $("aprsisHost").value,
+          aprsis_port: parseInt($("aprsisPort").value) || 14580,
+          aprsis_passcode: $("aprsisPasscode").value,
+          aprsis_filter: $("aprsisFilter").value,
+        });
+        setSavedStatus("Saved");
+        pushLog("status", "Settings saved");
+      } catch (e) { setSavedStatus("Error: " + (e.message || "")); }
+    });
+
+    $("connectTncBtn").addEventListener("click", async () => {
+      try {
+        await api("POST", "/api/tnc/connect", { host: $("host").value, port: parseInt($("port").value) || 8000 });
+        setFeedback("TNC connecting...", "ok");
+        pushLog("status", "TNC connect requested");
+      } catch (e) { setFeedback(e.message, "warn"); }
+    });
+
+    $("disconnectTncBtn").addEventListener("click", async () => {
+      try {
+        await api("POST", "/api/tnc/disconnect");
+        setFeedback("TNC disconnected", "ok");
+        pushLog("status", "TNC disconnected");
+      } catch (e) { setFeedback(e.message, "warn"); }
+    });
+
+    $("clearQueueBtn").addEventListener("click", async () => {
+      try {
+        await api("POST", "/api/tnc/clear-queue");
+        setFeedback("Queue cleared", "ok");
+        pushLog("status", "Queue cleared");
+      } catch (e) { setFeedback(e.message, "warn"); }
+    });
+
+    $("connectAprsIsBtn").addEventListener("click", async () => {
+      try {
+        await api("POST", "/api/aprsis/connect", {
+          host: $("aprsisHost").value,
+          port: parseInt($("aprsisPort").value) || 14580,
+          passcode: $("aprsisPasscode").value,
+          filter: $("aprsisFilter").value,
+        });
+        setFeedback("APRS-IS connecting...", "ok");
+        pushLog("status", "APRS-IS connect requested");
+      } catch (e) { setFeedback(e.message, "warn"); }
+    });
+
+    $("disconnectAprsIsBtn").addEventListener("click", async () => {
+      try {
+        await api("POST", "/api/aprsis/disconnect");
+        setFeedback("APRS-IS disconnected", "ok");
+        pushLog("status", "APRS-IS disconnected");
+      } catch (e) { setFeedback(e.message, "warn"); }
+    });
+
+    $("sendMessageBtn").addEventListener("click", async () => {
+      const dest = $("destination").value.trim();
+      const msg = $("message").value.trim();
+      if (!dest || !msg) { setFeedback("Fill in both To and Message fields", "warn"); return; }
+      try {
+        const r = await api("POST", "/api/send-message", { destination: dest, text: msg });
+        setFeedback("Message sent", "ok");
+        pushLog("tx", `Message to ${dest}: ${msg}`);
+        $("message").value = "";
+      } catch (e) { setFeedback(e.message, "warn"); }
+    });
+
+    $("sendBeaconBtn").addEventListener("click", async () => {
+      try {
+        const r = await api("POST", "/api/send-beacon");
+        setFeedback("Beacon sent", "ok");
+        pushLog("tx", "Manual beacon sent");
+      } catch (e) { setFeedback(e.message, "warn"); }
+    });
+
+    // Auto-uppercase callsign fields
+    ["source", "destination", "replyTo"].forEach(id => {
+      $(id)?.addEventListener("input", () => { $(id).value = $(id).value.toUpperCase(); });
+    });
+
+    // Derive APRS-IS passcode on callsign change
+    $("source").addEventListener("change", () => {
+      setValueIfIdle("aprsisPasscode", derivePasscode($("source").value));
+    });
+
+    // Restore + persist the remote token
+    $("remoteToken").value = getToken();
+    $("remoteToken").addEventListener("input", () => {
+      localStorage.setItem("aprswolf_remote_token", $("remoteToken").value.trim());
+    });
+
+    refresh().catch(e => pushLog("error", "Initial refresh failed: " + (e.message || e)));
+    setInterval(() => { refresh().catch(() => {}); }, 3000);
+  </script>
+</body>
+</html>

@@ -1,0 +1,28 @@
+name: verify
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: lts/*
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - name: Install frontend deps
+        run: npm ci
+
+      # The full local gate: frontend tests, backend tests, tsc, clippy.
+      # Run the same thing before pushing with: npm run verify
+      - name: Verify
+        run: npm run verify

@@ -1,0 +1,89 @@
+# APRSWolf In-App Help
+
+This document mirrors the Help window available from inside APRSWolf.
+
+![APRSWolf Help Window](images/aprswolf-help-window.png)
+
+## Help Topics
+
+### Overview
+
+- APRSWolf is a macOS APRS messaging app.
+- It supports RF messaging through a Dire Wolf compatible TNC and internet messaging through APRS-IS.
+- Only one transport can be active at a time.
+
+### Quick Start
+
+1. Open `APRSWolf > Preferences`.
+2. Enter your callsign and at least one transport.
+3. Click `Save`.
+4. Connect either TNC or APRS-IS from the main window.
+5. Enter the destination in `Message To`.
+6. Type a message.
+7. Click `Send`.
+
+### Preferences
+
+- `Preferences` is the first stop for a new user.
+- Save your callsign, digi path, theme, sound, ACK visibility, beacon coordinates, TNC settings, APRS-IS settings, and remote web defaults there.
+- Use the main window for live operating after setup is saved.
+
+### Station Setup
+
+- `Callsign` is your APRS callsign.
+- `Digi Path` is only used for RF/TNC sends.
+- `Theme` controls System, Light, or Dark appearance.
+- `Play Sound` uses the macOS alert sound for direct inbound messages.
+- `Message Font Size` resizes sent and received message text (range 10–32px, default 15px).
+- `Latitude`, `Longitude`, and `Symbol` are used for beaconing.
+
+### TNC Mode
+
+- Use `Connect TNC` when APRSWolf should talk to Dire Wolf over TCP.
+- Confirm the host and port match your Dire Wolf configuration.
+- TX and RX status show whether the connection is active.
+
+### APRS-IS Mode
+
+- Use `Connect APRS-IS` for internet APRS messaging.
+- The app normally derives the passcode from your callsign.
+- The APRS-IS filter is optional; APRSWolf does not force a default filter.
+- Example filters: `m/50`, `r/42.36/-71.06/25`, `t/WT1W`.
+
+### Sending Messages
+
+- `Message To` is the APRS addressee.
+- APRSWolf manages APRS message numbering and ACK tracking automatically.
+- Click any received message to open a reply dialog.
+
+### Receiving Traffic
+
+- Use filter chips to limit traffic by category.
+- `Messages` shows all APRS message frames; `To Me` only shows traffic addressed to your station.
+- Turn on `Promiscuous Base-Call` in the main window if `To Me` should also include your base callsign without the SSID.
+- Use `Pop Out` to open Received Messages in a separate window.
+- Leave `Show ACKs` off for everyday use.
+- Use `Traffic Log` when you need a full event history.
+
+### Remote Web Control
+
+- Enable the browser-based control page from the Remote Web Control panel.
+- While remote control is enabled, desktop controls stay visible but locked.
+- Disable Remote to restore normal desktop interaction.
+
+### Help Menu
+
+- Use `Help > APRSWolf Help` from the macOS menu bar for the built-in guide.
+- The Help window includes search, topic navigation, setup guidance, and troubleshooting notes.
+
+### Troubleshooting
+
+- No replies: verify destination, transport, and RF path.
+- TNC connection issues: confirm Dire Wolf is running and the TCP port is correct.
+- APRS-IS issues: verify the server, base callsign, and passcode.
+- Too much receive traffic: tighten the APRS-IS filter.
+
+## Recommendation
+
+Use the Help window for quick answers inside the app.
+Use [END-USER-GUIDE.md](END-USER-GUIDE.md) for the full step-by-step user guide.

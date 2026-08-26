@@ -1,0 +1,45 @@
+{
+  "name": "tauri-app",
+  "private": true,
+  "version": "1.0.0",
+  "displayVersion": "1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "test": "vitest run",
+    "test:rust": "node scripts/cargo-test.cjs",
+    "test:all": "vitest run && node scripts/cargo-test.cjs",
+    "verify": "npm run test:all && npx tsc --noEmit && cargo clippy --manifest-path src-tauri/Cargo.toml --quiet",
+    "play": "tauri dev",
+    "preview": "vite preview",
+    "tauri": "tauri",
+    "release:macos": "node scripts/build-macos-dmgs.cjs",
+    "release:macos:universal": "node scripts/build-macos-universal.cjs",
+    "release:macos:all": "npm run release:macos && npm run release:macos:universal",
+    "release:macos:open": "open src-tauri/target/universal-apple-darwin/release/bundle/dmg",
+    "release:linux": "bash scripts/build-linux-deb.sh",
+    "release:linux:no-tests": "bash scripts/build-linux-deb.sh --no-tests"
+  },
+  "dependencies": {
+    "@tauri-apps/api": "^2",
+    "@tauri-apps/plugin-dialog": "^2.6.0",
+    "@tauri-apps/plugin-fs": "^2.4.5",
+    "@tauri-apps/plugin-notification": "^2.3.3",
+    "@tauri-apps/plugin-opener": "^2",
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2",
+    "@testing-library/jest-dom": "^6.9.1",
+    "@testing-library/react": "^16.3.2",
+    "@types/react": "^19.1.8",
+    "@types/react-dom": "^19.1.6",
+    "@vitejs/plugin-react": "^4.6.0",
+    "jsdom": "^29.0.1",
+    "typescript": "~5.8.3",
+    "vite": "^7.0.4",
+    "vitest": "^4.1.1"
+  }
+}
