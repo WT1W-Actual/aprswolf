@@ -820,39 +820,6 @@ pub async fn mark_acked(
     Ok(())
 }
 
-async fn mark_delivered_by_payload(
-    app: &AppHandle,
-    state: &AppState,
-    source: &str,
-    destination: &str,
-    body: &str,
-) -> Result<bool, String> {
-    let source_norm = source.trim().to_uppercase();
-    let destination_norm = destination.trim().to_uppercase();
-    let body_norm = body.trim().to_string();
-
-    let mut queue = state.queue.lock().await;
-    let Some(item) = queue.iter_mut().find(|msg| {
-        msg.status != DeliveryState::Acked
-            && msg.status != DeliveryState::Expired
-            && msg.source == source_norm
-            && msg.destination == destination_norm
-            && msg.body == body_norm
-    }) else {
-        return Ok(false);
-    };
-
-    item.status = DeliveryState::Acked;
-    item.next_retry_at_ms = None;
-    item.last_error = None;
-    let snapshot = item.clone();
-    drop(queue);
-
-    persist_queue(state).await?;
-    emit_delivery(app, &snapshot, Some("confirmed by self-heard transmit".to_string()));
-    Ok(true)
-}
-
 fn format_callsign(address: &ParsedAddress) -> String {
     if address.ssid == 0 {
         address.callsign.clone()
@@ -962,7 +929,7 @@ async fn write_kiss_frame(
 
 /// Process a single AGW frame from the TNC receiver.
 /// Handles K-frames (AX.25 parsing, ACK detection, auto-reply, UI events)
-/// and T-frames (Dire Wolf monitor reports for delivery confirmation).
+/// and T-frames (Dire Wolf reports of our own transmissions, logged only).
 async fn process_agw_frame(
     agw_frame: AgwFrame,
     app: &AppHandle,
@@ -1158,27 +1125,11 @@ async fn process_agw_frame(
                 monitor_text.trim_end_matches('\0')
             )),
         );
-        if let Some((header, body)) = monitor_text.split_once('\r') {
-            let payload_body = body.trim_matches(|c| c == '\r' || c == '\0');
-            if let Some((_src_part, rest)) = header.split_once(":Fm ") {
-                if let Some((source_part, after_to)) = rest.split_once(" To ") {
-                    let destination_part = after_to.split(" Via ").next().unwrap_or(after_to).trim();
-                    if let Some(aprs_msg) = parse_aprs_message(payload_body) {
-                        let _ =
-                            mark_delivered_by_payload(app, state, source_part.trim(), &aprs_msg.addressee, &aprs_msg.text).await;
-                    } else {
-                        let _ = mark_delivered_by_payload(
-                            app,
-                            state,
-                            source_part.trim(),
-                            destination_part,
-                            payload_body,
-                        )
-                        .await;
-                    }
-                }
-            }
-        }
+        // A 'T' frame is Dire Wolf telling us it put one of our own frames
+        // on the air. That proves the frame was transmitted, not that the
+        // other station received it, so it must not change delivery state.
+        // Only an ack from the addressee marks a message Acked; until
+        // then the retry task keeps resending.
     } else {
         emit_status(app, "rx_debug", Some(debug_detail));
     }
