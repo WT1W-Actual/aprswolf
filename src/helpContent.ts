@@ -18,7 +18,7 @@ export const HELP_SECTIONS: HelpSection[] = [
     blocks: [
       {
         type: "paragraph",
-        text: "APRSWolf is a macOS APRS messaging app. Open Preferences first to save your station callsign, transport details, beacon coordinates, and remote-control defaults. Then use the main window for live connections, messaging, and traffic review. Only one transport can be active at a time.",
+        text: "APRSWolf is a desktop APRS messaging app for macOS, Windows, and Linux. Open Preferences first to save your station callsign, transport details, beacon coordinates, and remote-control defaults. Then use the main window for live connections, messaging, and traffic review. Only one transport can be active at a time.",
       },
       {
         type: "list",
@@ -43,7 +43,7 @@ export const HELP_SECTIONS: HelpSection[] = [
         type: "steps",
         title: "Fastest path",
         items: [
-          "Choose APRSWolf > Preferences and enter your callsign.",
+          "Choose Preferences from the app menu (macOS: APRSWolf > Preferences) and enter your callsign.",
           "Add at least one transport: TNC host/port or APRS-IS server/port/passcode.",
           "Click Save to store your setup.",
           "Choose one transport: Connect TNC for RF or Connect APRS-IS for internet APRS.",
@@ -63,7 +63,7 @@ export const HELP_SECTIONS: HelpSection[] = [
   {
     id: "preferences",
     title: "Preferences",
-    summary: "Use the native macOS Preferences window for first-run setup and saved defaults.",
+    summary: "Use the Preferences window for first-run setup and saved defaults.",
     blocks: [
       {
         type: "paragraph",
@@ -84,8 +84,8 @@ export const HELP_SECTIONS: HelpSection[] = [
       {
         type: "callout",
         tone: "info",
-        title: "macOS menu bar",
-        text: "Use APRSWolf > Preferences for saved setup and Help > APRSWolf Help for the built-in guide. The main window stays focused on live operating tasks.",
+        title: "App menu",
+        text: "Use Preferences for saved setup and Help > APRSWolf Help for the built-in guide. On macOS these live in the APRSWolf menu bar; on Windows and Linux they are in the app menu. The main window stays focused on live operating tasks.",
       },
     ],
   },
@@ -100,7 +100,7 @@ export const HELP_SECTIONS: HelpSection[] = [
           "Callsign: your APRS callsign, including SSID if you use one.",
           "Digi Path: used for RF/TNC sends only. APRS-IS sends ignore the RF path.",
           "Theme: System, Light, or Dark.",
-          "Play Sound: macOS alert sound for direct inbound messages addressed to you.",
+          "Play Sound: system alert sound for direct inbound messages addressed to you (macOS only; a no-op on Windows and Linux).",
           "Message Font Size: slider to resize sent and received message text (10–32px).",
           "Latitude, Longitude, Symbol: used for manual beacons and auto-beacon on connect.",
         ],
@@ -269,12 +269,12 @@ export const HELP_SECTIONS: HelpSection[] = [
   {
     id: "help",
     title: "Help Window",
-    summary: "Find the built-in user guide from the macOS Help menu or the main window.",
+    summary: "Find the built-in user guide from the app menu or the main window.",
     blocks: [
       {
         type: "list",
         items: [
-          "Choose Help > APRSWolf Help from the macOS menu bar for the standard app help entry point.",
+          "Choose Help > APRSWolf Help from the app menu for the standard app help entry point (the macOS menu bar on Mac, the app menu on Windows and Linux).",
           "Use the search field to jump to setup, transport, beacon, remote-control, or troubleshooting topics.",
           "Use the topic list to move between overview, quick start, preferences, transport setup, and troubleshooting pages.",
           "Keep the Help window open while you work; it does not interrupt the live connection window.",

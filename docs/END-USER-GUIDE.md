@@ -2,7 +2,7 @@
 
 ## What APRSWolf Is
 
-APRSWolf is a macOS desktop app for APRS messaging.
+APRSWolf is a desktop app for APRS messaging. It runs on macOS, Windows, and Linux.
 
 You can use it in two ways:
 
@@ -13,16 +13,36 @@ Only one connection mode can be active at a time.
 
 ## Which Download To Use
 
+Grab the latest version from the
+[Releases page](https://github.com/WT1W-Actual/aprswolf/releases/latest).
+
+| Your computer | Download this |
+|---|---|
+| Mac, Intel | `APRSWolf_1.0_x64.dmg` |
+| Mac, Apple Silicon (M1/M2/M3/M4) | `APRSWolf_1.0_aarch64.dmg` |
+| Windows | `APRSWolf_1.0_x64-setup.exe` (or the `.msi`) |
+| Linux, Debian or Ubuntu (Intel/AMD 64-bit) | `APRSWolf_1.0_amd64.deb` |
+| Linux, Debian or Ubuntu (ARM64, e.g. Raspberry Pi OS 64-bit) | `APRSWolf_1.0_arm64.deb` |
+| Linux, Fedora or openSUSE (Intel/AMD 64-bit) | `APRSWolf-1.0-1.amd64.rpm` |
+| Linux, Fedora or openSUSE (ARM64) | `APRSWolf-1.0-1.arm64.rpm` |
+| Linux, any distro (Intel/AMD 64-bit) | `APRSWolf_1.0_amd64.AppImage` |
+| Linux, any distro (ARM64) | `APRSWolf_1.0_arm64.AppImage` |
+
+**Which ARM build do I need?** The `aarch64` DMG is for **Apple Silicon Macs**
+(M1 and later). The `arm64` Linux packages are for **ARM64 Linux**, such as a
+64-bit Raspberry Pi. They are not interchangeable — pick the one that matches
+your operating system, not just the CPU family.
+
 Recommended for most users:
 
-- Universal macOS DMG
-
-The current macOS release is published as a universal DMG, so it runs on both Intel and Apple Silicon Macs.
+- macOS: the DMG that matches your Mac — `x64` for Intel, `aarch64` for Apple Silicon
+- Windows: the `.exe` installer
+- Linux: the `.deb` on Debian/Ubuntu, the `.rpm` on Fedora/openSUSE, or the AppImage on any distro
 
 ## Quick Start
 
-1. Install APRSWolf from the universal macOS DMG.
-2. Open `APRSWolf > Preferences` from the macOS menu bar.
+1. Install APRSWolf for your platform (see [Installing APRSWolf](#installing-aprswolf)).
+2. Open `Preferences` from the app menu (macOS: `APRSWolf > Preferences`; Windows/Linux: the Preferences item in the app menu).
 3. Enter your callsign and save at least one connection path.
 4. Choose one connection mode from the main window:
 	- `Connect TNC` for Dire Wolf / RF use
@@ -34,29 +54,48 @@ The current macOS release is published as a universal DMG, so it runs on both In
 
 ## Downloads And Release Files
 
-Primary download:
+Primary downloads by platform:
 
-- `APRSWolf_1.0_universal.dmg`
+- macOS: `APRSWolf_1.0_x64.dmg` (Intel) or `APRSWolf_1.0_aarch64.dmg` (Apple Silicon)
+- Windows: `APRSWolf_1.0_x64-setup.exe` (or `APRSWolf_1.0_x64.msi`)
+- Linux: `APRSWolf_1.0_amd64.deb`, `APRSWolf-1.0-1.amd64.rpm`, or `APRSWolf_1.0_amd64.AppImage`
 
-Use the universal DMG for both Intel and Apple Silicon Macs.
+On Linux, use the `arm64` packages on ARM64 hardware such as a 64-bit Raspberry Pi. On macOS, use `aarch64` for Apple Silicon and `x64` for Intel.
 
 ## Installing APRSWolf
 
-1. Open the DMG.
+### macOS
+
+1. Open the DMG that matches your Mac (`x64` for Intel, `aarch64` for Apple Silicon).
 2. Drag APRSWolf into your Applications folder.
 3. Open APRSWolf from Applications.
-4. If macOS warns that the app was downloaded from the internet, use the normal macOS Open flow.
+4. If macOS warns that the app was downloaded from the internet, open System Settings → Privacy & Security, scroll down, and click **Open Anyway**.
+
+### Windows
+
+1. Run the `.exe` (or `.msi`) installer.
+2. Follow the installer prompts.
+3. Open APRSWolf from the Start menu.
+4. If SmartScreen says it protected your PC, click **More info**, then **Run anyway**.
+
+### Linux
+
+- Debian/Ubuntu: install the `.deb` with `sudo apt install ./APRSWolf_1.0_amd64.deb`.
+- Fedora/openSUSE: install the `.rpm` with `sudo dnf install ./APRSWolf-1.0-1.amd64.rpm` (or `zypper install`).
+- Any distro (AppImage): make it executable first (`chmod +x APRSWolf_1.0_amd64.AppImage`), then run it.
+
+The macOS and Windows builds are not code-signed yet, so the first launch needs the extra click described above.
 
 ## First-Time Setup
 
-Use `APRSWolf > Preferences` for all saved setup. The main window is intended for live connections, sending, receiving, and traffic review.
+Use `Preferences` for all saved setup. The main window is intended for live connections, sending, receiving, and traffic review.
 
 ### Station Settings
 
 - Callsign: your APRS callsign, including SSID if needed, such as `WT1W-15`
 - Digi Path: the digipeater path to use for RF messaging, such as `WIDE1-1,WIDE2-1`
 - Theme: `System`, `Light`, or `Dark`
-- Message Sound: plays the default macOS alert sound for messages addressed to you
+- Message Sound: plays the system alert sound for messages addressed to you (macOS only; a no-op on Windows and Linux)
 - Message Font Size: slider to resize sent and received message text (range 10–32px, default 15px)
 - Beacon Latitude / Longitude / Symbol: used when sending a manual beacon
 
@@ -201,17 +240,17 @@ The `Show ACKs` checkbox controls whether APRS ACK frames appear in the received
 
 When `Message Sound` is enabled:
 
-- APRSWolf plays the default macOS system alert sound
+- APRSWolf plays the system alert sound (macOS only; on Windows and Linux this is a no-op)
 - Only direct messages addressed to your callsign trigger the sound
 - ACK messages do not trigger the sound
 
-This is not a macOS notification popup. It is only the system sound.
+This is not a system notification popup. It is only the alert sound.
 
 ## Theme / Dark Mode
 
 Theme options:
 
-- `System`: follows macOS appearance automatically
+- `System`: follows your operating system appearance automatically
 - `Light`: always use the light theme
 - `Dark`: always use the dark theme
 
@@ -254,9 +293,9 @@ It is useful for:
 
 ## In-App Help Window
 
-Use `Help > APRSWolf Help` in the macOS menu bar, or the Help button in the main window, to open the built-in help window.
+Use `Help > APRSWolf Help` in the app menu, or the Help button in the main window, to open the built-in help window.
 
-The Help window is designed like a standard macOS utility window:
+The Help window is designed like a standard utility window:
 
 - a title bar with search
 - a topic sidebar for quick navigation
@@ -307,7 +346,7 @@ What you can do from this page:
 
 ## Remote Web Control
 
-APRSWolf can expose a remote web control page.
+APRSWolf can expose a remote web control page. This works the same way on macOS, Windows, and Linux.
 
 When remote control is enabled:
 
@@ -338,7 +377,7 @@ Check the following:
 
 - Dire Wolf is running
 - the TCP port is correct
-- your Mac can reach the Dire Wolf host
+- your computer can reach the Dire Wolf host
 - Dire Wolf is configured to allow the KISS or compatible TCP connection you are using
 
 ### I am connected but not seeing traffic
@@ -354,10 +393,11 @@ Check the following:
 Check the following:
 
 - `Message Sound` is enabled
+- you are on macOS (the alert sound is macOS only; it is a no-op on Windows and Linux)
 - the message is actually addressed to your station
 - the packet is not just an ACK
-- your Mac output volume is up
-- macOS alert sounds are not muted
+- your system output volume is up
+- system alert sounds are not muted
 
 ### I am seeing too much clutter in Received Messages
 

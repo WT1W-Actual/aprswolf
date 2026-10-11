@@ -8,13 +8,13 @@ This document mirrors the Help window available from inside APRSWolf.
 
 ### Overview
 
-- APRSWolf is a macOS APRS messaging app.
+- APRSWolf is a desktop APRS messaging app for macOS, Windows, and Linux.
 - It supports RF messaging through a Dire Wolf compatible TNC and internet messaging through APRS-IS.
 - Only one transport can be active at a time.
 
 ### Quick Start
 
-1. Open `APRSWolf > Preferences`.
+1. Open `Preferences` from the app menu (macOS: `APRSWolf > Preferences`).
 2. Enter your callsign and at least one transport.
 3. Click `Save`.
 4. Connect either TNC or APRS-IS from the main window.
@@ -33,7 +33,7 @@ This document mirrors the Help window available from inside APRSWolf.
 - `Callsign` is your APRS callsign.
 - `Digi Path` is only used for RF/TNC sends.
 - `Theme` controls System, Light, or Dark appearance.
-- `Play Sound` uses the macOS alert sound for direct inbound messages.
+- `Play Sound` uses the system alert sound for direct inbound messages (macOS only; a no-op on Windows and Linux).
 - `Message Font Size` resizes sent and received message text (range 10–32px, default 15px).
 - `Latitude`, `Longitude`, and `Symbol` are used for beaconing.
 
@@ -73,7 +73,7 @@ This document mirrors the Help window available from inside APRSWolf.
 
 ### Help Menu
 
-- Use `Help > APRSWolf Help` from the macOS menu bar for the built-in guide.
+- Use `Help > APRSWolf Help` from the app menu for the built-in guide.
 - The Help window includes search, topic navigation, setup guidance, and troubleshooting notes.
 
 ### Troubleshooting

@@ -25,8 +25,11 @@ This folder contains versioned release notes for published APRSWolf builds.
 Releases are published by the `release` GitHub Actions workflow when a `v*` tag
 is pushed. Each release attaches artifacts for all supported platforms:
 
-- macOS: universal, Intel, and Apple Silicon DMGs
-- Linux: `.deb`, `.rpm`, and `.AppImage` for amd64 and arm64
+- macOS: Intel (`x64`) and Apple Silicon (`aarch64`) DMGs
+- Linux: `.deb`, `.rpm`, and `.AppImage` for amd64 and arm64 (ARM64 Linux, e.g. Raspberry Pi OS 64-bit)
 - Windows: MSI and NSIS `.exe` for x64
+
+Note: the macOS `aarch64` DMG is for Apple Silicon Macs; the Linux `arm64`
+packages are for ARM64 Linux. They are not interchangeable.
 
 See the [project README](../../README.md#releases) for the full artifact table.

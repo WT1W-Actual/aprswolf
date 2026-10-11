@@ -1,9 +1,9 @@
 #!/usr/bin/env zsh
 # ─────────────────────────────────────────────────────────────
-# APRSWolf — Full build + universal DMG
+# APRSWolf — Full build + per-arch DMGs
 # ─────────────────────────────────────────────────────────────
 # Usage:
-#   ./build.sh                  build universal DMG
+#   ./build.sh                  build Intel + Apple Silicon DMGs
 #   ./build.sh --no-clean       skip cargo clean (faster rebuild)
 #   ./build.sh --help           this message
 # ─────────────────────────────────────────────────────────────
@@ -26,21 +26,16 @@ echo "── Tests ──"
 npx vitest run
 echo ""
 
-# ── 3. Universal DMG ──
+# ── 3. Per-arch DMGs (Intel x64 + Apple Silicon aarch64) ──
+echo "── macOS DMGs ──"
+node scripts/build-macos-dmgs.cjs
 if [[ "$1" == "--no-clean" ]]; then
-  echo "── Universal DMG (skipping cargo clean) ──"
-  node scripts/build-macos-universal-no-clean.cjs 2>/dev/null || {
-    echo "⚠  no-clean script not found, running standard build..."
-    node scripts/build-macos-universal.cjs
-  }
-else
-  echo "── Universal DMG ──"
-  node scripts/build-macos-universal.cjs
+  echo "(note: --no-clean is ignored; build-macos-dmgs.cjs does not clean)"
 fi
 echo ""
 
 # ── 4. Show result ──
-DMG=$(ls -t src-tauri/target/universal-apple-darwin/release/bundle/dmg/*.dmg 2>/dev/null | head -1)
+DMG=$(ls -t src-tauri/target/aarch64-apple-darwin/release/bundle/dmg/*.dmg 2>/dev/null | head -1)
 if [[ -n "$DMG" ]]; then
   SIZE=$(stat -f "%z" "$DMG" | awk '{printf "%.1f MB", $1/1048576}')
   echo "═══ Done: ${DMG:t} (${SIZE}) ═══"
@@ -50,12 +45,9 @@ fi
 echo ""
 
 # ── 5. Copy Apple Silicon .app to /Applications ──
-# Prefer the aarch64 (Apple Silicon) .app bundle; fall back to universal.
 APP_SRC=""
 if [[ -d "src-tauri/target/aarch64-apple-darwin/release/bundle/macos/APRSWolf.app" ]]; then
   APP_SRC="src-tauri/target/aarch64-apple-darwin/release/bundle/macos/APRSWolf.app"
-elif [[ -d "src-tauri/target/universal-apple-darwin/release/bundle/macos/APRSWolf.app" ]]; then
-  APP_SRC="src-tauri/target/universal-apple-darwin/release/bundle/macos/APRSWolf.app"
 fi
 
 if [[ -n "$APP_SRC" ]]; then

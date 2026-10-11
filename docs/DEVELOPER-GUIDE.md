@@ -39,13 +39,13 @@ npm run test          # frontend (Vitest)
 cd src-tauri && cargo test    # backend (Rust)
 cd src-tauri && cargo check   # backend compile check only
 
-# Release (current target: macOS only)
-npm run release:macos:universal
+# Release (macOS, Linux, Windows)
+npm run release:macos
 ```
 
 ## Project Architecture
 
-APRSWolf is a **Tauri v2 + React (TypeScript)** desktop app - a single macOS `.app` bundle with a Rust backend and a web-based frontend rendered by the system WebView (WKWebView on macOS).
+APRSWolf is a **Tauri v2 + React (TypeScript)** desktop app - a native app bundle with a Rust backend and a web-based frontend rendered by the system WebView (WKWebView on macOS, WebView2 on Windows, WebKitGTK on Linux).
 
 ```
 ┌─────────────────────────────────────────────────┐
@@ -324,7 +324,7 @@ This audit was run on 2026-06-17 by the Ponytail plugin. The findings below are 
 
 ## Mac App Store Gotchas
 
-- **Code signing is mandatory.** The universal DMG build produces an unsigned bundle. You need an Apple Developer ID certificate and must run `codesign` after the `lipo` merge step.
+- **Code signing is mandatory.** The macOS DMG build produces an unsigned bundle. You need an Apple Developer ID certificate and must run `codesign` on the `.app` before packaging.
 - **Notarization required.** After signing, submit to Apple for notarization before distribution.
 - **Sandbox entitlements.** The Mac App Store requires sandboxing. APRSWolf's TNC access (network connections to Dire Wolf) and file I/O (settings persistence) will need explicit entitlements. Map these carefully - the networking entitlements for TNC TCP access must allow arbitrary TCP connections to localhost devices.
 - **Tauri v2 + Mac App Store** has known quirks. Test the sandboxed build thoroughly before submission. Key areas: file access (settings), network access (TNC, APRS-IS), and webview behavior under sandbox.
@@ -374,15 +374,25 @@ git tag v1.0.0 && git push origin v1.0.0
 Local builds per platform:
 
 ```bash
-npm run release:macos:universal   # macOS universal DMG
+npm run release:macos             # macOS Intel (x64) + Apple Silicon (aarch64) DMGs
 npm run release:linux             # Linux .deb + .rpm + .AppImage (on Linux); or release:linux:no-tests
 npm run release:windows           # Windows MSI + NSIS .exe (on Windows); or release:windows:no-tests
 ```
 
 macOS and Windows artifacts are unsigned for now; sign/notarize before public
-distribution by adding signing secrets to the `release` workflow. If you
-distribute the universal `.app`, sign it after the `lipo` merge step used by the
-universal packaging script.
+distribution by adding signing secrets to the `release` workflow.
+
+### Artifact naming and ARM targets
+
+The macOS and Linux ARM artifacts target different operating systems and are not
+interchangeable:
+
+- macOS Apple Silicon uses the `aarch64` label (`APRSWolf_X.Y_aarch64.dmg`).
+- Linux ARM64 uses the `arm64` label (`APRSWolf_X.Y_arm64.deb`, `.rpm`, `.AppImage`),
+  for ARM64 Linux such as a 64-bit Raspberry Pi.
+
+There is no macOS universal DMG; Intel and Apple Silicon are shipped as separate
+DMGs.
 
 ## Version History
 

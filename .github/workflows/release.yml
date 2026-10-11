@@ -10,11 +10,12 @@ name: release
 #      (Manual runs upload artifacts only; no Release is created.)
 #
 # Artifacts produced:
-#   macOS   : APRSWolf_<ver>_universal.dmg, _x64.dmg, _aarch64.dmg
+#   macOS   : APRSWolf_<ver>_x64.dmg (Intel), APRSWolf_<ver>_aarch64.dmg (Apple Silicon)
 #   Linux   : APRSWolf_<ver>_amd64.deb / _arm64.deb
 #             APRSWolf-<ver>-1.amd64.rpm / -1.arm64.rpm
 #             APRSWolf_<ver>_amd64.AppImage / _arm64.AppImage
-#   Windows : APRSWolf_<ver>_x64.msi, APRSWolf_<ver>_x64.exe (NSIS)
+#             (Linux arm64 = ARM64 Linux, e.g. Raspberry Pi OS 64-bit)
+#   Windows : APRSWolf_<ver>_x64.msi, APRSWolf_<ver>_x64-setup.exe (NSIS)
 
 on:
   workflow_dispatch:
@@ -30,7 +31,7 @@ env:
 
 jobs:
   # ───────────────────────────────────────────────────────────
-  # macOS — per-architecture DMGs + a universal DMG
+  # macOS — per-architecture DMGs (Intel x64 + Apple Silicon arm64)
   # ───────────────────────────────────────────────────────────
   macos:
     name: macOS (${{ matrix.label }})
@@ -41,7 +42,7 @@ jobs:
         include:
           - label: x64
             target: x86_64-apple-darwin
-          - label: arm64
+          - label: aarch64
             target: aarch64-apple-darwin
     steps:
       - uses: actions/checkout@v7
@@ -86,43 +87,9 @@ jobs:
           path: dist-macos/*.dmg
           if-no-files-found: error
 
-  macos-universal:
-    name: macOS (universal)
-    runs-on: macos-latest
-    steps:
-      - uses: actions/checkout@v7
-
-      - uses: actions/setup-node@v7
-        with:
-          node-version: lts/*
-          cache: npm
-
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: x86_64-apple-darwin,aarch64-apple-darwin
-
-      - name: Install frontend dependencies
-        run: npm ci
-
-      # Reuses the existing universal packaging script (clean rebuild of both
-      # arch bundles, lipo merge, DMG creation, display-version naming).
-      - name: Build universal DMG
-        run: npm run release:macos:universal
-
-      - name: Collect universal DMG
-        run: |
-          mkdir -p dist-macos
-          cp src-tauri/target/universal-apple-darwin/release/bundle/dmg/*.dmg dist-macos/
-          ls -1 dist-macos
-
-      - uses: actions/upload-artifact@v7
-        with:
-          name: APRSWolf-macos-universal
-          path: dist-macos/*.dmg
-          if-no-files-found: error
-
   # ───────────────────────────────────────────────────────────
   # Linux — .deb + .rpm + .AppImage for amd64 and arm64
+  # (arm64 = ARM64 Linux, e.g. Raspberry Pi OS 64-bit — NOT Apple Silicon)
   # ───────────────────────────────────────────────────────────
   linux:
     name: Linux (${{ matrix.label }})
@@ -258,7 +225,7 @@ jobs:
   # ───────────────────────────────────────────────────────────
   release:
     name: Publish GitHub Release
-    needs: [macos, macos-universal, linux, windows]
+    needs: [macos, linux, windows]
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/')
     steps:

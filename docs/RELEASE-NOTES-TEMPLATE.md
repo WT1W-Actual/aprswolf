@@ -14,7 +14,7 @@ Release date:
 
 Primary download:
 
-- `APRSWolf_X.Y_universal.dmg`
+- `APRSWolf_X.Y_x64.dmg` (Intel Mac) or `APRSWolf_X.Y_aarch64.dmg` (Apple Silicon Mac)
 
 ## What's New
 
@@ -41,23 +41,26 @@ Primary download:
 
 macOS:
 
-- Universal DMG: `APRSWolf_X.Y_universal.dmg`
 - Intel DMG: `APRSWolf_X.Y_x64.dmg`
 - Apple Silicon DMG: `APRSWolf_X.Y_aarch64.dmg`
 
 Linux:
 
-- Debian/Ubuntu (amd64): `APRSWolf_X.Y_amd64.deb`
-- Debian/Ubuntu (arm64): `APRSWolf_X.Y_arm64.deb`
-- Fedora/RHEL (amd64): `APRSWolf-X.Y-1.amd64.rpm`
-- Fedora/RHEL (arm64): `APRSWolf-X.Y-1.arm64.rpm`
-- AppImage (amd64): `APRSWolf_X.Y_amd64.AppImage`
-- AppImage (arm64): `APRSWolf_X.Y_arm64.AppImage`
+- Debian/Ubuntu (Intel/AMD 64-bit): `APRSWolf_X.Y_amd64.deb`
+- Debian/Ubuntu (ARM64, e.g. Raspberry Pi OS 64-bit): `APRSWolf_X.Y_arm64.deb`
+- Fedora/RHEL (Intel/AMD 64-bit): `APRSWolf-X.Y-1.amd64.rpm`
+- Fedora/RHEL (ARM64): `APRSWolf-X.Y-1.arm64.rpm`
+- AppImage (Intel/AMD 64-bit): `APRSWolf_X.Y_amd64.AppImage`
+- AppImage (ARM64): `APRSWolf_X.Y_arm64.AppImage`
 
 Windows:
 
 - MSI installer (x64): `APRSWolf_X.Y_x64.msi`
 - NSIS installer (x64): `APRSWolf_X.Y_x64-setup.exe`
+
+Note: the macOS `aarch64` DMG is for Apple Silicon Macs. The Linux `arm64`
+packages are for ARM64 Linux (for example a 64-bit Raspberry Pi). They are not
+interchangeable.
 
 ## Known Issues
 

@@ -1045,7 +1045,7 @@ describe("HelpWindow", () => {
 
     expect(await screen.findByText("APRSWolf User Guide")).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Overview" })).toBeInTheDocument();
-    expect(screen.getByText(/APRSWolf is a macOS APRS messaging app/i)).toBeInTheDocument();
+    expect(screen.getByText(/APRSWolf is a desktop APRS messaging app for macOS, Windows, and Linux/i)).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: /Remote Web Control/i }));
 

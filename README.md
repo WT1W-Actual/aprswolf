@@ -31,13 +31,20 @@ No build tools needed.
 
 | Your computer | Download this |
 |---------------|---------------|
-| Mac, any (Intel or Apple Silicon) | `APRSWolf_1.0_universal.dmg` |
-| Mac, Intel only | `APRSWolf_1.0_x64.dmg` |
-| Mac, Apple Silicon only | `APRSWolf_1.0_arm64.dmg` |
+| Mac, Intel | `APRSWolf_1.0_x64.dmg` |
+| Mac, Apple Silicon (M1/M2/M3/M4) | `APRSWolf_1.0_aarch64.dmg` |
 | Windows | `APRSWolf_1.0_x64-setup.exe` (or the `.msi`) |
-| Linux, Debian or Ubuntu | `APRSWolf_1.0_amd64.deb` (`arm64` for a 64-bit Raspberry Pi) |
-| Linux, Fedora or openSUSE | `APRSWolf-1.0-1.amd64.rpm` (`arm64` for ARM) |
-| Linux, any distro | `APRSWolf_1.0_amd64.AppImage` (`arm64` for ARM) |
+| Linux, Debian or Ubuntu (Intel/AMD 64-bit) | `APRSWolf_1.0_amd64.deb` |
+| Linux, Debian or Ubuntu (ARM64, e.g. Raspberry Pi OS 64-bit) | `APRSWolf_1.0_arm64.deb` |
+| Linux, Fedora or openSUSE (Intel/AMD 64-bit) | `APRSWolf-1.0-1.amd64.rpm` |
+| Linux, Fedora or openSUSE (ARM64) | `APRSWolf-1.0-1.arm64.rpm` |
+| Linux, any distro (Intel/AMD 64-bit) | `APRSWolf_1.0_amd64.AppImage` |
+| Linux, any distro (ARM64) | `APRSWolf_1.0_arm64.AppImage` |
+
+**Which ARM build do I need?** The `aarch64` DMG is for **Apple Silicon Macs**
+(M1 and later). The `arm64` Linux packages are for **ARM64 Linux**, such as a
+64-bit Raspberry Pi. They are not interchangeable — pick the one that matches
+your operating system, not just the CPU family.
 
 The macOS and Windows builds aren't code-signed yet, so the first launch
 needs one extra click:
@@ -189,13 +196,12 @@ bash, zsh and fish itself.
 Don't also run `brew install rust`. That formula is a separate Rust with
 its own `cargo` and `rustc`, built for your Mac's own chip only. If it
 comes first on the PATH, the build uses it instead of rustup, the
-targets added above are never seen, and the universal build fails with
+targets added above are never seen, and the build fails with
 `can't find crate for std` for `x86_64-apple-darwin`. If you already
 installed it, `brew uninstall rust` fixes this.
 
-The `release:macos` and `release:macos:universal` scripts check for both
-targets and stop with a "Missing Rust targets" message if one is
-missing.
+The `release:macos` script checks for both targets and stops with a
+"Missing Rust targets" message if one is missing.
 
 ### Linux (Debian, Ubuntu, Raspberry Pi OS)
 
@@ -305,17 +311,15 @@ Each command builds the installers for the OS it runs on, the same
 files the [Download](#download) table lists:
 
 ```bash
-npm run release:macos:universal   # macOS: universal .dmg
+npm run release:macos             # macOS: Intel and Apple Silicon .dmg
 npm run release:linux             # Linux: .deb, .rpm and .AppImage
 npm run release:windows           # Windows (PowerShell): .msi and setup .exe
 ```
 
-The macOS `.dmg` is written to
-`src-tauri/target/universal-apple-darwin/release/bundle/dmg/`
-(`npm run release:macos:open` opens that folder). Linux builds are
+The macOS DMGs are written to
+`src-tauri/target/<arch>-apple-darwin/release/bundle/dmg/`
+(`npm run release:macos:open` opens the Apple Silicon folder). Linux builds are
 collected in `dist-linux/` and Windows builds in `dist-windows/`.
-`npm run release:macos` builds separate Intel and Apple Silicon DMGs
-instead.
 
 ## Scripts
 
@@ -326,8 +330,6 @@ instead.
 - npm run play: Tauri dev app (frontend + Rust backend).
 - npm run tauri dev: Direct Tauri dev run.
 - npm run release:macos: Build Intel and Apple Silicon DMGs.
-- npm run release:macos:universal: Build a universal macOS app and DMG from the two arch bundles.
-- npm run release:macos:all: Build both per-arch DMGs and the universal macOS DMG.
 - npm run release:linux: Build Linux `.deb` + `.rpm` + `.AppImage` (run on Linux).
 - npm run release:linux:no-tests: Same, skipping tests.
 - npm run release:windows: Build Windows MSI + NSIS `.exe` (run on Windows).
