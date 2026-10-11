@@ -2,6 +2,27 @@
 
 Tauri + React desktop app for APRS messaging over KISS/AGW TCP (Dire Wolf compatible) and APRS-IS.
 
+![APRSWolf main window](docs/images/aprswolf-readme.png)
+
+APRS messaging shouldn't mean squinting at a terminal or wrestling a
+client from another decade. APRSWolf puts your station on one clean
+screen. Point it at Dire Wolf or Graywolf over the network and you're
+on RF; switch to APRS-IS and you're on the internet backbone with the
+same window and the same messages.
+
+Type a callsign and a message and hit Send. APRSWolf numbers it,
+queues it, and keeps retrying with backoff until the other station acks
+or the message expires, so you can watch delivery instead of guessing.
+Incoming traffic sorts itself into filters for direct messages,
+bulletins, weather, Mic-E, telemetry and more, and a click on any
+message starts a reply. Position beacons go out on connect and on a
+timer.
+
+Leave the radio in the shack and run it from the couch: the built-in
+remote control serves a browser page you can open from your phone on
+the local network once you set a remote token. It runs on macOS, Linux
+and Windows.
+
 ## Documentation
 
 - Documentation index: see [docs/README.md](docs/README.md)
