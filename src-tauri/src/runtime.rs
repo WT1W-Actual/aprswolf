@@ -145,6 +145,24 @@ fn is_aprs_ack_text(text: &str) -> bool {
         return false;
     }
 
-    let (prefix, rest) = trimmed.split_at(3);
+    // `split_at` panics if byte 3 falls inside a multibyte character, so
+    // check the boundary first.
+    let Some((prefix, rest)) = trimmed.split_at_checked(3) else {
+        return false;
+    };
     prefix.eq_ignore_ascii_case("ack") && rest.chars().all(|c| c.is_ascii_alphanumeric())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_aprs_ack_text;
+
+    #[test]
+    fn ack_text_check_does_not_panic_on_multibyte_input() {
+        let lossy = String::from_utf8_lossy(&[b'a', 0xFF, b'x']).to_string();
+        for input in ["a€", "ab€", lossy.as_str()] {
+            assert!(!is_aprs_ack_text(input));
+        }
+        assert!(is_aprs_ack_text("ack12"));
+    }
 }

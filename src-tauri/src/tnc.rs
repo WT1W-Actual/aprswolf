@@ -308,9 +308,11 @@ fn validate_aprs_message_text(text: &str) -> Result<(), String> {
 pub fn parse_ack_id(text: &str) -> Option<String> {
     let trimmed = text.trim();
     // Accept both "ACK:" (with colon, any case) and "ack"/"ACK" (without colon, any case).
-    let ack_part = if trimmed.len() >= 4 && trimmed[..4].eq_ignore_ascii_case("ack:") {
+    // `get` returns None instead of panicking when the cut would fall inside
+    // a multibyte character, which received packets can contain.
+    let ack_part = if trimmed.get(..4).is_some_and(|p| p.eq_ignore_ascii_case("ack:")) {
         &trimmed[4..]
-    } else if trimmed.len() >= 3 && trimmed[..3].eq_ignore_ascii_case("ack") {
+    } else if trimmed.get(..3).is_some_and(|p| p.eq_ignore_ascii_case("ack")) {
         &trimmed[3..]
     } else {
         return None;
@@ -1757,6 +1759,14 @@ mod tests {
         // More than 5 characters should be rejected
         assert_eq!(parse_ack_id("ackABCDE1"), None);
         assert_eq!(parse_ack_id("ACK:123456"), None);
+    }
+
+    #[test]
+    fn parse_ack_id_does_not_panic_on_multibyte_input() {
+        let lossy = String::from_utf8_lossy(&[b'a', 0xFF, b'x']).to_string();
+        for input in ["a€", "ab€", "ack€", lossy.as_str()] {
+            assert_eq!(parse_ack_id(input), None);
+        }
     }
 
     #[test]

@@ -132,7 +132,7 @@ fn extract_aprs_message_text(info_text: &str) -> String {
 
 fn normalize_ack_display_body(body: &str) -> Option<String> {
     let trimmed = body.trim();
-    if trimmed.len() < 3 || !trimmed[..3].eq_ignore_ascii_case("ack") {
+    if !trimmed.get(..3).is_some_and(|p| p.eq_ignore_ascii_case("ack")) {
         return None;
     }
 
@@ -563,6 +563,14 @@ mod tests {
 
         let normalized = normalize_received_message(value);
         assert_eq!(normalized.get("body").and_then(Value::as_str), Some("ack12"));
+    }
+
+    #[test]
+    fn normalize_received_message_does_not_panic_on_multibyte_body() {
+        for body in [":WT1W-15  :a€", ":WT1W-15  :ab€", ":WT1W-15  :a\u{FFFD}x"] {
+            let normalized = normalize_received_message(json!({ "body": body }));
+            assert!(normalized.get("body").and_then(Value::as_str).is_some());
+        }
     }
 
     #[test]
