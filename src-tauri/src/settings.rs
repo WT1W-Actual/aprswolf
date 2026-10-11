@@ -208,14 +208,18 @@ fn is_aprs_weather_report(body: &str) -> bool {
     let starts_with_position = matches!(bytes.first(), Some(b'!') | Some(b'='));
     let starts_with_timestamped_position = matches!(bytes.first(), Some(b'@') | Some(b'/'));
 
+    // Uncompressed layout: data type (1), latitude "4903.50N" (8), symbol
+    // table (1), longitude "07201.75W" (9), symbol code (1). The table sits
+    // at byte 9 and the symbol code at byte 19; a timestamp ("092345z", 7)
+    // pushes both 7 bytes later. A weather station's symbol code is '_'.
+    let is_symbol_table = |ch: &u8| ch.is_ascii_alphanumeric() || *ch == b'/' || *ch == b'\\';
+
     if starts_with_position {
-        return bytes.get(8).map(|ch| ch.is_ascii_alphabetic() || ch.is_ascii_digit() || *ch == b'/' || *ch == b'\\') == Some(true)
-            && bytes.get(18) == Some(&b'_');
+        return bytes.get(9).is_some_and(is_symbol_table) && bytes.get(19) == Some(&b'_');
     }
 
     if starts_with_timestamped_position {
-        return bytes.get(15).map(|ch| ch.is_ascii_alphabetic() || ch.is_ascii_digit() || *ch == b'/' || *ch == b'\\') == Some(true)
-            && bytes.get(25) == Some(&b'_');
+        return bytes.get(16).is_some_and(is_symbol_table) && bytes.get(26) == Some(&b'_');
     }
 
     false
@@ -571,6 +575,22 @@ mod tests {
             let normalized = normalize_received_message(json!({ "body": body }));
             assert!(normalized.get("body").and_then(Value::as_str).is_some());
         }
+    }
+
+    #[test]
+    fn uncompressed_weather_reports_are_classified_as_wx() {
+        // Weather stations in the uncompressed position layout, without and
+        // with a timestamp.
+        for body in [
+            "!4903.50N/07201.75W_220/004g005t077r000p000P000h50b09900",
+            "@092345z4903.50N/07201.75W_220/004g005t077r000p000P000h50b09900",
+        ] {
+            let normalized = normalize_received_message(json!({ "body": body }));
+            assert_eq!(normalized.get("aprsType").and_then(Value::as_str), Some("wx"), "{body}");
+        }
+        // A plain house symbol at the same offsets is a position, not weather.
+        let normalized = normalize_received_message(json!({ "body": "!4903.50N/07201.75W-Test" }));
+        assert_eq!(normalized.get("aprsType").and_then(Value::as_str), Some("pos"));
     }
 
     #[test]
