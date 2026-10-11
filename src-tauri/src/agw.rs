@@ -46,8 +46,10 @@ impl AgwBinaryDecoder {
                 self.buffer[30],
                 self.buffer[31],
             ];
-            // Dire Wolf sends data_len in big-endian (network byte order)
-            // while Graywolf uses little-endian. Try LE first, fall back to BE.
+            // AGWPE defines data_len as little-endian, and Dire Wolf sends
+            // it that way on every host (its host2netle macro only swaps on
+            // big-endian machines). The big-endian fallback is a guard
+            // against a nonconforming server.
             const MAX_AGW_DATA_LEN: usize = 65_536;
             let data_len = {
                 let le = u32::from_le_bytes(data_len_bytes) as usize;
@@ -118,8 +120,7 @@ pub fn parse_agw_frame(frame_bytes: &[u8]) -> Option<AgwFrame> {
         frame_bytes[30],
         frame_bytes[31],
     ];
-    // Dire Wolf sends data_len in big-endian (network byte order)
-    // while Graywolf uses little-endian. Try LE first, fall back to BE.
+    // AGWPE defines data_len as little-endian; see AgwBinaryDecoder::ingest.
     const MAX_AGW_DATA_LEN: usize = 65_536;
     let data_len = {
         let le = u32::from_le_bytes(data_len_bytes) as usize;

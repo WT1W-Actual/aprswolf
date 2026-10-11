@@ -1290,10 +1290,11 @@ pub async fn connect_tnc(
         {
             let mut writer_lock = rx_writer.lock().await;
             if let Some(ref mut writer) = *writer_lock {
-                // Build registration frames for both Dire Wolf and Graywolf.
-                // Each TNC recognizes a different register command:
-                //   R = register callsign (Dire Wolf)
-                //   X = register callsign (Graywolf)
+                // In the AGWPE protocol, which both Dire Wolf and Graywolf
+                // follow:
+                //   R = request the server's version number (the callsign
+                //       bytes in this frame are ignored)
+                //   X = register our callsign
                 let mut r_frame = [0u8; AGW_HEADER_LEN];
                 r_frame[4] = b'R';
                 let call_bytes = my_call_for_task.as_bytes();
@@ -1312,8 +1313,8 @@ pub async fn connect_tnc(
                 let m_frame = build_startup_command_frames()[3]; // m
 
                 let startup_cmds: &[&[u8]] = &[
-                    &r_frame,  // Dire Wolf register (R)
-                    &x_frame,  // Graywolf register (X)
+                    &r_frame,  // version request (R)
+                    &x_frame,  // callsign registration (X)
                     build_startup_command_frames()[1], // G (port info)
                     k_frame,   // Dire Wolf monitor start (k)
                     m_frame,   // Graywolf monitor start (m)
