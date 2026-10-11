@@ -853,6 +853,16 @@ fn format_callsign(address: &ParsedAddress) -> String {
     }
 }
 
+/// True for AGWPE monitor text such as `" 1:Fm W1AW To APRS Via WIDE1-1
+/// <UI pid=F0 Len=12 >[12:00:00]"`: a port number, a colon, then "Fm ".
+/// Graywolf's 'U' frames are TNC2 lines (`W1AW>APRS,WIDE1-1:...`) and
+/// don't match.
+fn is_agwpe_monitor_text(text: &str) -> bool {
+    let trimmed = text.trim_start();
+    let digits = trimmed.chars().take_while(|c| c.is_ascii_digit()).count();
+    digits > 0 && trimmed[digits..].starts_with(":Fm ")
+}
+
 pub(crate) fn parse_tnc2_protocol_view(line: &str) -> Option<(String, String, Vec<String>, String)> {
     let gt = line.find('>')?;
     let source = line[..gt].trim().to_string();
@@ -1046,6 +1056,16 @@ async fn process_agw_frame(
         // text data (e.g. "SRC>DST,PATH:info text\r").
         let monitor_text = String::from_utf8_lossy(&agw_frame.data).to_string();
         let tnc2_line = monitor_text.trim_matches(|c| c == '\r' || c == '\0');
+        if is_agwpe_monitor_text(tnc2_line) {
+            // Dire Wolf sends every received packet twice once both raw ('k')
+            // and monitor ('m') delivery are on: as a raw 'K' frame, handled
+            // above, and as a 'U' frame in AGWPE's human-readable monitor
+            // format. That format isn't TNC2, so parsing it here produced a
+            // second, garbled copy of the packet. The 'K' copy is the one we
+            // keep.
+            emit_status(app, "rx_debug", Some(format!("{debug_detail} [monitor-format U frame skipped; raw K frame carries the packet]")));
+            return;
+        }
         emit_status(
             app,
             "rx_debug",
@@ -1730,7 +1750,7 @@ pub fn get_manual_beacon_cooldown_remaining(app: AppHandle) -> u64 {
 
 #[cfg(test)]
 mod tests {
-    use super::{build_queued_message_payloads, callsign_matches_station, ack_ids_for_station, parse_ack_id, parse_ax25_station, parse_digipeater_path, resolve_uncompressed_symbol, split_reply_ack_id, strip_crlf, validate_aprs_message_text, validate_ax25_callsign, validate_position, validate_uncompressed_position_comment, APRS_TOCALL};
+    use super::{build_queued_message_payloads, callsign_matches_station, ack_ids_for_station, is_agwpe_monitor_text, parse_ack_id, parse_ax25_station, parse_digipeater_path, resolve_uncompressed_symbol, split_reply_ack_id, strip_crlf, validate_aprs_message_text, validate_ax25_callsign, validate_position, validate_uncompressed_position_comment, APRS_TOCALL};
     use crate::ax25::build_aprs_position_info;
 
     #[test]
@@ -1791,6 +1811,16 @@ mod tests {
         assert_eq!(parse_ack_id("ack@42"), None);
         assert_eq!(parse_ack_id("ack 42"), None);
         assert_eq!(parse_ack_id("ack-42"), None);
+    }
+
+    #[test]
+    fn agwpe_monitor_text_is_told_apart_from_tnc2() {
+        // Dire Wolf's monitor format, as its server.c documents it.
+        assert!(is_agwpe_monitor_text(" 1:Fm ZL4FOX-8 To Q7P2U2 <UI pid=F0 Len=28 >[08:25:07]\r`I1*l V>/\"9<}[:Barts Tracker"));
+        assert!(is_agwpe_monitor_text("1:Fm W1AW To APRS Via WIDE1-1 <UI pid=F0 Len=5 >[12:00:00]\rhello"));
+        // Graywolf's TNC2 lines must still be parsed.
+        assert!(!is_agwpe_monitor_text("W1AW>APRS,WIDE1-1:hello"));
+        assert!(!is_agwpe_monitor_text("W1AW-9>APRS::WT1W-15  :Fm the field{12"));
     }
 
     #[test]
