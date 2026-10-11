@@ -14,7 +14,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager};
 use tauri::async_runtime::JoinHandle;
-use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
+use tokio::io::{AsyncBufRead, AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::net::TcpStream;
 use tokio::sync::{mpsc, Mutex};
 
@@ -80,6 +80,21 @@ fn normalize_aprsis_filter(filter: &str) -> String {
         .collect::<String>()
         .trim()
         .to_string()
+}
+
+/// Read one APRS-IS line, capped at `MAX_APRSIS_LINE_BYTES`.
+///
+/// Reads raw bytes rather than a String: `read_line` fails with
+/// `InvalidData` on any non-UTF-8 byte, which used to end the whole
+/// session. APRS-IS relays packets from many clients, some sending Latin-1
+/// or other 8-bit text, so the line is decoded lossily instead.
+async fn read_aprsis_line<R: AsyncBufRead + Unpin>(reader: &mut R) -> std::io::Result<(usize, String)> {
+    let mut raw = Vec::new();
+    let n = reader
+        .take(MAX_APRSIS_LINE_BYTES)
+        .read_until(b'\n', &mut raw)
+        .await?;
+    Ok((n, String::from_utf8_lossy(&raw).into_owned()))
 }
 
 #[derive(Clone, Default)]
@@ -304,14 +319,7 @@ pub async fn connect_aprsis(
                     }
                 }
 
-                read_result = async {
-                    let mut line = String::new();
-                    (&mut line_reader)
-                        .take(MAX_APRSIS_LINE_BYTES)
-                        .read_line(&mut line)
-                        .await
-                        .map(|n| (n, line))
-                } => {
+                read_result = read_aprsis_line(&mut line_reader) => {
                     match read_result {
                         Ok((0, _)) => {
                             emit_status(
@@ -505,7 +513,19 @@ pub async fn disconnect_aprsis_for_app(app: AppHandle) -> Result<(), String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{normalize_aprsis_filter, parse_tnc2, unwrap_third_party};
+    use super::{normalize_aprsis_filter, parse_tnc2, read_aprsis_line, unwrap_third_party};
+
+    #[tokio::test]
+    async fn read_aprsis_line_survives_non_utf8_bytes() {
+        // 0xE9 is "é" in Latin-1 and is not valid UTF-8 on its own.
+        let input: &[u8] = b"N0CALL>APRS:>caf\xE9\r\nN0CALL>APRS:>next\r\n";
+        let mut reader = input;
+        let (n, first) = read_aprsis_line(&mut reader).await.expect("first line reads");
+        assert!(n > 0);
+        assert!(first.starts_with("N0CALL>APRS:>caf\u{FFFD}"));
+        let (_, second) = read_aprsis_line(&mut reader).await.expect("second line reads");
+        assert_eq!(second.trim_end(), "N0CALL>APRS:>next");
+    }
 
     #[test]
     fn normalize_filter_strips_command_prefix_and_newlines() {
