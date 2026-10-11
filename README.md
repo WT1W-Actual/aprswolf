@@ -323,42 +323,4 @@ cargo check
 
 ## For maintainers
 
-APRSWolf ships for macOS, Linux, and Windows. The recommended way to publish a
-release is to push a version tag (e.g. `v1.0.0`); the `release` GitHub Actions
-workflow builds every platform and attaches all artifacts to a single GitHub
-Release.
-
-### Publishing a release
-
-1. Bump the version in `package.json` (`version` + `displayVersion`),
-   `src-tauri/Cargo.toml`, and `src-tauri/tauri.conf.json`.
-2. Copy [docs/RELEASE-NOTES-TEMPLATE.md](docs/RELEASE-NOTES-TEMPLATE.md) to
-   `docs/releases/X.Y.Z.md` and fill it in.
-3. Add the new version to [docs/releases/README.md](docs/releases/README.md).
-4. Commit, then push a tag: `git tag v1.0.0 && git push origin v1.0.0`.
-5. The `release` workflow builds all platforms and publishes the GitHub Release.
-
-### Building release packages locally
-
-macOS (universal DMG):
-
-```bash
-npm run release:macos:universal
-```
-
-Linux (`.deb` + `.rpm` + `.AppImage`, run on Linux):
-
-```bash
-npm run release:linux            # or release:linux:no-tests
-```
-
-Windows (MSI + NSIS `.exe`, run on Windows):
-
-```powershell
-npm run release:windows          # or release:windows:no-tests
-```
-
-Signing and notarization note:
-
-- If you distribute the universal `.app`, sign it after the `lipo` merge step used by the universal packaging script.
-- macOS and Windows artifacts are currently unsigned; add signing secrets to the `release` workflow when ready.
+Release steps are in the [Developer Guide](docs/DEVELOPER-GUIDE.md#build--release).
