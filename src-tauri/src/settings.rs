@@ -93,6 +93,20 @@ impl Default for AppSettings {
     }
 }
 
+/// Write `contents` to `path` without ever leaving a half-written file.
+///
+/// The data goes to a temporary file beside the target, which is then
+/// renamed over it. A rename within one directory is atomic, so a crash or
+/// power cut mid-write leaves either the old file or the new one, never a
+/// truncated mix that fails to parse.
+fn write_atomic(path: &std::path::Path, contents: &str) -> std::io::Result<()> {
+    let mut tmp_name = path.file_name().unwrap_or_default().to_os_string();
+    tmp_name.push(".tmp");
+    let tmp_path = path.with_file_name(tmp_name);
+    fs::write(&tmp_path, contents)?;
+    fs::rename(&tmp_path, path)
+}
+
 fn settings_path(app: &AppHandle) -> Result<std::path::PathBuf, String> {
     let dir = app
         .path()
@@ -415,7 +429,7 @@ pub fn save_settings(app: AppHandle, settings: serde_json::Value) -> Result<(), 
     let path = settings_path(&app)?;
     let json = serde_json::to_string_pretty(&merged_settings)
         .map_err(|err| format!("failed to serialize settings: {err}"))?;
-    fs::write(&path, json).map_err(|err| format!("failed to write settings file: {err}"))?;
+    write_atomic(&path, &json).map_err(|err| format!("failed to write settings file: {err}"))?;
     // Only cache after a successful write so the cache never diverges from disk.
     *settings_cache().write().unwrap() = Some(merged_settings.clone());
     app.emit("settings_updated", merged_settings)
@@ -481,7 +495,7 @@ pub fn save_received_messages(
     *received_cache().write().unwrap() = Some(messages.clone());
     let json = serde_json::to_string_pretty(&messages)
         .map_err(|err| format!("failed to serialize received messages: {err}"))?;
-    fs::write(dir.join(RECEIVED_MESSAGES_FILE), json)
+    write_atomic(&dir.join(RECEIVED_MESSAGES_FILE), &json)
         .map_err(|err| format!("failed to write received messages file: {err}"))
 }
 
@@ -520,7 +534,7 @@ fn schedule_received_flush(app: AppHandle) {
                 let snapshot = received_cache().read().unwrap().clone().unwrap_or_default();
                 if let Ok(dir) = worker_app.path().app_data_dir() {
                     if let Ok(json) = serde_json::to_string_pretty(&snapshot) {
-                        let _ = fs::write(dir.join(RECEIVED_MESSAGES_FILE), json);
+                        let _ = write_atomic(&dir.join(RECEIVED_MESSAGES_FILE), &json);
                     }
                 }
                 // Any notify that arrived during the sleep leaves a permit, so
@@ -535,7 +549,21 @@ fn schedule_received_flush(app: AppHandle) {
 
 #[cfg(test)]
 mod tests {
-    use super::normalize_received_message;
+    use super::{normalize_received_message, write_atomic};
+
+    #[test]
+    fn write_atomic_replaces_the_file_and_leaves_no_temp_behind() {
+        let dir = std::env::temp_dir().join(format!("aprswolf-write-atomic-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("settings.json");
+        std::fs::write(&path, "{\"old\":true}").unwrap();
+
+        write_atomic(&path, "{\"new\":true}").unwrap();
+
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "{\"new\":true}");
+        assert!(!dir.join("settings.json.tmp").exists());
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
     use serde_json::{json, Value};
 
     #[test]
