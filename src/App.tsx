@@ -378,6 +378,16 @@ function App() {
     }
   }
 
+  // For lines built from backend events. The Traffic Log window renders
+  // those events from its own listeners, so the flag keeps it from showing
+  // each one a second time; the activity notice here still gets them.
+  function pushEventLog(kind: LogItem["kind"], text: string) {
+    publishUiLog(kind, text, { fromBackendEvent: true });
+    if (import.meta.env.DEV) {
+      console.log(`[${kind.toUpperCase()}] ${text}`);
+    }
+  }
+
   function shouldMergeMultipart(previous: string, incoming: string): boolean {
     const prev = previous.trim();
     const next = incoming.trim();
@@ -431,16 +441,16 @@ function App() {
         if (event.payload.state === "tx_debug" || event.payload.state === "rx_debug") {
           return; // suppress packet-level debug noise
         } else if (event.payload.state === "tx_error") {
-          pushLog("error", `[TX ERROR] ${event.payload.detail}`);
+          pushEventLog("error", `[TX ERROR] ${event.payload.detail}`);
         } else if (event.payload.state === "rx_raw") {
-          pushLog("status", `[RX RAW] ${event.payload.detail}`);
+          pushEventLog("status", `[RX RAW] ${event.payload.detail}`);
         } else if (event.payload.state === "rx_parsed") {
-          pushLog("status", `[RX PARSED] ${event.payload.detail}`);
+          pushEventLog("status", `[RX PARSED] ${event.payload.detail}`);
         } else if (event.payload.state === "rx_parse_error") {
-          pushLog("error", `[RX PARSE ERROR] ${event.payload.detail}`);
+          pushEventLog("error", `[RX PARSE ERROR] ${event.payload.detail}`);
         } else {
           const detail = event.payload.detail ? ` (${event.payload.detail})` : "";
-          pushLog("status", `status: ${event.payload.state}${detail}`);
+          pushEventLog("status", `status: ${event.payload.state}${detail}`);
         }
       });
       if (!track(unlistenStatus)) return () => {};
@@ -448,7 +458,7 @@ function App() {
       const unlistenMessage = await listen<MessagePayload>("tnc_message", (event) => {
         if (!active) return;
         if (!hasNormalizedMessagePayload(event.payload)) {
-          pushLog("error", "[RX ERROR] malformed receive payload dropped");
+          pushEventLog("error", "[RX ERROR] malformed receive payload dropped");
           return;
         }
 
@@ -467,7 +477,7 @@ function App() {
         const summary = summarySource && summaryDestination
           ? `${summarySource} > ${summaryDestination}${path}: ${normalizedBody}`
           : event.payload.text;
-        pushLog("rx", `RX ${event.payload.bytes}B ${summary} [${event.payload.payload_hex}]`);
+        pushEventLog("rx", `RX ${event.payload.bytes}B ${summary} [${event.payload.payload_hex}]`);
         setReceivedItems((prev) => {
           const now = Date.now();
           const from = event.payload.from;
@@ -515,7 +525,7 @@ function App() {
         if (!active) return;
         const detail = event.payload.detail ? ` (${event.payload.detail})` : "";
         const kind = event.payload.status === "failed" || event.payload.status === "expired" ? "error" : "status";
-        pushLog(
+        pushEventLog(
           kind,
           `delivery #${event.payload.id} ${event.payload.status} attempts=${event.payload.attempts}${detail}`,
         );
@@ -537,7 +547,7 @@ function App() {
         const detail = event.payload.detail ? ` (${event.payload.detail})` : "";
         const kind = event.payload.state === "aprsis_error" ? "error" : "status";
         if (event.payload.state !== "aprsis_debug") {
-          pushLog(kind, `aprsis: ${event.payload.state}${detail}`);
+          pushEventLog(kind, `aprsis: ${event.payload.state}${detail}`);
         }
       });
       if (!track(unlistenAprsIs)) return () => {};

@@ -5,6 +5,7 @@ import HelpWindow from "./HelpWindow";
 import LogWindow from "./LogWindow";
 import PreferencesWindow from "./PreferencesWindow";
 import ReceivedWindow from "./ReceivedWindow";
+import { publishUiLog } from "./logBus";
 import packageJson from "../package.json";
 
 const invokeMock = vi.fn() as any;
@@ -1023,6 +1024,18 @@ describe("LogWindow", () => {
     expect(await screen.findByText("[RX ERROR] malformed receive payload dropped")).toBeInTheDocument();
     expect(screen.queryByText(/RX 4B/)).not.toBeInTheDocument();
     expect(screen.queryByText("broken-packet")).not.toBeInTheDocument();
+  });
+
+  it("shows main-window log lines once and skips copies of backend events", async () => {
+    render(<LogWindow />);
+
+    // The log window renders backend events from its own listeners, so the
+    // main window's republished copy of one must not appear a second time.
+    publishUiLog("status", "aprsis: aprsis_verified (copy)", { fromBackendEvent: true });
+    publishUiLog("tx", "Beacon sent via APRS-IS: 0.0000,0.0000 sym=/-");
+
+    expect(await screen.findByText("Beacon sent via APRS-IS: 0.0000,0.0000 sym=/-")).toBeInTheDocument();
+    expect(screen.queryByText("aprsis: aprsis_verified (copy)")).not.toBeInTheDocument();
   });
 });
 

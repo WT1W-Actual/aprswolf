@@ -82,6 +82,9 @@ function LogWindow() {
     let active = true;
     const unsubscribeUiLog = subscribeUiLog((payload) => {
       if (!active) return;
+      // Backend events arrive through the listeners below; the main
+      // window's copy of the same line would show up twice.
+      if (payload.fromBackendEvent) return;
       pushLogItem(payload);
     });
 

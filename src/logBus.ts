@@ -4,6 +4,10 @@ export type UiLogPayload = {
   kind: LogKind;
   text: string;
   time: string;
+  // Set when the line was built from a backend event (tnc_status,
+  // tnc_message, tnc_delivery, aprsis_status). The Traffic Log window
+  // listens to those events itself, so it skips these to avoid duplicates.
+  fromBackendEvent?: boolean;
 };
 
 const CHANNEL_NAME = "aprswolf-traffic-log";
@@ -37,8 +41,12 @@ export function makeUiLogPayload(kind: LogKind, text: string): UiLogPayload {
   };
 }
 
-export function publishUiLog(kind: LogKind, text: string): UiLogPayload {
-  const payload = makeUiLogPayload(kind, text);
+export function publishUiLog(
+  kind: LogKind,
+  text: string,
+  options: { fromBackendEvent?: boolean } = {},
+): UiLogPayload {
+  const payload: UiLogPayload = { ...makeUiLogPayload(kind, text), ...options };
   try {
     getPublishChannel()?.postMessage(payload);
   } catch {
