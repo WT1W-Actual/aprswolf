@@ -409,11 +409,34 @@ fn build_queued_message_payloads(
     })
 }
 
-fn parse_aprs_message_ack(info_text: &str) -> Option<String> {
-    let trimmed = info_text.trim();
-    let (_, payload) = trimmed.split_once(':')?;
-    let (_, message_text) = payload.split_once(':')?;
-    parse_ack_id(message_text)
+/// Message ids that `info_text` acknowledges on behalf of `station`.
+///
+/// An APRS ack is a message addressed to the station whose message it
+/// confirms, so anything addressed elsewhere is ignored: another station's
+/// `ack07` must not clear our own message 07 to the same sender. Two forms
+/// count: a plain `ackNN` message, and the reply-ack half of an incoming
+/// message id (`{MM}AA` acknowledges our `AA`).
+pub(crate) fn ack_ids_for_station(info_text: &str, station: &str, allow_base_callsign: bool) -> Vec<String> {
+    let Some(aprs_msg) = parse_aprs_message(info_text.trim()) else {
+        return Vec::new();
+    };
+    if !callsign_matches_station(&aprs_msg.addressee, station, allow_base_callsign) {
+        return Vec::new();
+    }
+    let mut ids = Vec::new();
+    match aprs_msg.msgid.as_deref() {
+        None => {
+            if let Some(id) = parse_ack_id(&aprs_msg.text) {
+                ids.push(id);
+            }
+        }
+        Some(msgid) => {
+            if let Some((_, Some(reply_ack))) = split_reply_ack_id(msgid) {
+                ids.push(reply_ack.to_string());
+            }
+        }
+    }
+    ids
 }
 
 pub(crate) fn callsign_matches_station(addressee: &str, station: &str, allow_base_callsign: bool) -> bool {
@@ -976,18 +999,11 @@ async fn process_agw_frame(
                     (format_callsign(&ax25_payload.source), info_text.clone())
                 };
 
-                if let Some(ack_id) = parse_ack_id(&aprs_info) {
-                    let _ = mark_acked(app, state, &ack_id, &aprs_source).await;
-                } else if let Some(ack_id) = parse_aprs_message_ack(&aprs_info) {
+                let settings = crate::settings::load_settings(app.clone());
+                for ack_id in ack_ids_for_station(&aprs_info, my_callsign, settings.promiscuous_base_callsign) {
                     let _ = mark_acked(app, state, &ack_id, &aprs_source).await;
                 }
                 if let Some(aprs_msg) = parse_aprs_message(&aprs_info) {
-                    if let Some(ref msgid) = aprs_msg.msgid {
-                        if let Some((_, Some(reply_ack))) = split_reply_ack_id(msgid) {
-                            let _ = mark_acked(app, state, reply_ack, &aprs_source).await;
-                        }
-                    }
-                    let settings = crate::settings::load_settings(app.clone());
                     if callsign_matches_station(
                         &aprs_msg.addressee,
                         my_callsign,
@@ -1042,18 +1058,11 @@ async fn process_agw_frame(
         if let Some((aprs_source, _dest, _path, info_text)) =
             parse_tnc2_protocol_view(tnc2_line)
         {
-            if let Some(ack_id) = parse_ack_id(&info_text) {
-                let _ = mark_acked(app, state, &ack_id, &aprs_source).await;
-            } else if let Some(ack_id) = parse_aprs_message_ack(&info_text) {
+            let settings = crate::settings::load_settings(app.clone());
+            for ack_id in ack_ids_for_station(&info_text, my_callsign, settings.promiscuous_base_callsign) {
                 let _ = mark_acked(app, state, &ack_id, &aprs_source).await;
             }
             if let Some(aprs_msg) = parse_aprs_message(&info_text) {
-                if let Some(ref msgid) = aprs_msg.msgid {
-                    if let Some((_, Some(reply_ack))) = split_reply_ack_id(msgid) {
-                        let _ = mark_acked(app, state, reply_ack, &aprs_source).await;
-                    }
-                }
-                let settings = crate::settings::load_settings(app.clone());
                 if callsign_matches_station(
                     &aprs_msg.addressee,
                     my_callsign,
@@ -1721,7 +1730,7 @@ pub fn get_manual_beacon_cooldown_remaining(app: AppHandle) -> u64 {
 
 #[cfg(test)]
 mod tests {
-    use super::{build_queued_message_payloads, callsign_matches_station, parse_ack_id, parse_aprs_message_ack, parse_ax25_station, parse_digipeater_path, resolve_uncompressed_symbol, split_reply_ack_id, strip_crlf, validate_aprs_message_text, validate_ax25_callsign, validate_position, validate_uncompressed_position_comment, APRS_TOCALL};
+    use super::{build_queued_message_payloads, callsign_matches_station, ack_ids_for_station, parse_ack_id, parse_ax25_station, parse_digipeater_path, resolve_uncompressed_symbol, split_reply_ack_id, strip_crlf, validate_aprs_message_text, validate_ax25_callsign, validate_position, validate_uncompressed_position_comment, APRS_TOCALL};
     use crate::ax25::build_aprs_position_info;
 
     #[test]
@@ -1785,16 +1794,23 @@ mod tests {
     }
 
     #[test]
-    fn parse_aprs_message_ack_alphanumeric() {
-        // Test parsing a full APRS message info field that is an ACK with alphanumeric ID
-        let info = ":W1XYZ    :ackAB1";
-        assert_eq!(parse_aprs_message_ack(info), Some("AB1".to_string()));
+    fn ack_ids_for_station_reads_acks_addressed_to_us() {
+        assert_eq!(ack_ids_for_station(":W1XYZ    :ackAB1", "W1XYZ", false), vec!["AB1"]);
+        assert_eq!(ack_ids_for_station(":W1XYZ    :ack42", "W1XYZ", false), vec!["42"]);
+        assert_eq!(ack_ids_for_station(":W1XYZ    :ack12}34", "W1XYZ", false), vec!["12"]);
+        // Reply-ack: an incoming message {MM}AA acknowledges our AA.
+        assert_eq!(ack_ids_for_station(":W1XYZ    :hello{05}07", "W1XYZ", false), vec!["07"]);
+    }
 
-        let info2 = ":DEST     :ack42";
-        assert_eq!(parse_aprs_message_ack(info2), Some("42".to_string()));
-
-        let info3 = ":DEST     :ack12}34";
-        assert_eq!(parse_aprs_message_ack(info3), Some("12".to_string()));
+    #[test]
+    fn ack_ids_for_station_ignores_acks_to_other_stations() {
+        assert!(ack_ids_for_station(":K2ABC    :ack07", "W1XYZ", false).is_empty());
+        assert!(ack_ids_for_station(":K2ABC    :hello{05}07", "W1XYZ", false).is_empty());
+        // Another SSID of ours counts only when base-callsign matching is on.
+        assert!(ack_ids_for_station(":W1XYZ-7  :ack07", "W1XYZ-9", false).is_empty());
+        assert_eq!(ack_ids_for_station(":W1XYZ-7  :ack07", "W1XYZ-9", true), vec!["07"]);
+        // A bare "ack07" info field names no addressee, so it can't be matched.
+        assert!(ack_ids_for_station("ack07", "W1XYZ", false).is_empty());
     }
 
     #[test]

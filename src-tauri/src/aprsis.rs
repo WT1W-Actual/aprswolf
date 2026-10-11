@@ -400,14 +400,12 @@ pub async fn connect_aprsis(
 
                                     // If this is an APRS message addressed to us, send an ACK back.
                                     if let Some(ref info_text) = aprs_info {
+                                        let allow_base_callsign = crate::settings::load_settings(app_clone.clone()).promiscuous_base_callsign;
+                                        for ack_id in crate::tnc::ack_ids_for_station(info_text, &callsign_norm, allow_base_callsign) {
+                                            let tnc_state = app_clone.state::<crate::tnc::AppState>().inner().clone();
+                                            let _ = crate::tnc::mark_acked(&app_clone, &tnc_state, &ack_id, aprs_source.as_deref().unwrap_or("")).await;
+                                        }
                                         if let Some(aprs_msg) = parse_aprs_message(info_text) {
-                                            if let Some(ref msgid) = aprs_msg.msgid {
-                                                if let Some((_, Some(reply_ack))) = crate::tnc::split_reply_ack_id(msgid) {
-                                                    let tnc_state = app_clone.state::<crate::tnc::AppState>().inner().clone();
-                                                    let _ = crate::tnc::mark_acked(&app_clone, &tnc_state, reply_ack, aprs_source.as_deref().unwrap_or("")).await;
-                                                }
-                                            }
-                                            let allow_base_callsign = crate::settings::load_settings(app_clone.clone()).promiscuous_base_callsign;
                                             if crate::tnc::callsign_matches_station(&aprs_msg.addressee, &callsign_norm, allow_base_callsign) {
                                                 crate::runtime::maybe_play_addressed_message_sound(&app_clone, &aprs_msg.text);
                                                 if let Some(ref msgid) = aprs_msg.msgid {
@@ -421,13 +419,6 @@ pub async fn connect_aprsis(
                                                         let _ = w.write_all(ack_line.as_bytes()).await;
                                                         let _ = w.flush().await;
                                                     }
-                                                }
-                                            }
-                                            // Check if this is an incoming ACK for one of our sent messages.
-                                            if aprs_msg.msgid.is_none() && aprs_msg.text.to_lowercase().starts_with("ack") {
-                                                if let Some(ack_id_str) = crate::tnc::parse_ack_id(&aprs_msg.text) {
-                                                    let tnc_state = app_clone.state::<crate::tnc::AppState>().inner().clone();
-                                                    let _ = crate::tnc::mark_acked(&app_clone, &tnc_state, &ack_id_str, aprs_source.as_deref().unwrap_or("")).await;
                                                 }
                                             }
                                         }
