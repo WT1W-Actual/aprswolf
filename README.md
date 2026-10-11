@@ -63,6 +63,19 @@ network:
 
 The [End User Guide](docs/END-USER-GUIDE.md) walks through the rest.
 
+### Troubleshooting
+
+- No replies from bots:
+  Verify "Message To" is the bot callsign and path is valid for your RF area.
+- App layout jumps or grows:
+  Traffic Log should stay off by default; if enabled, it scrolls internally.
+- Connection succeeds but no decode events:
+  Verify the RX socket endpoint and that Dire Wolf is configured to allow AGW TCP connections.
+- Can't connect to Dire Wolf:
+  Ensure Dire Wolf is running on the target host and that your network allows TCP traffic to
+  the configured AGW/KISS port. On the Dire Wolf host, check `AGWPORT` and `KISSPORT` settings
+  in `direwolf.conf`.
+
 ## Documentation
 
 - Documentation index: see [docs/README.md](docs/README.md)
@@ -236,6 +249,18 @@ directly, `cargo install tauri-cli` adds `cargo tauri`. It creates only
 ln -s ~/.cargo/bin/cargo-tauri ~/.cargo/bin/tauri   # macOS and Linux
 ```
 
+### Get the code
+
+```bash
+git clone https://github.com/WT1W-Actual/aprswolf.git
+cd aprswolf
+```
+
+Git comes with the Xcode Command Line Tools on macOS. On Linux, install
+it with `sudo apt-get install git`; on Windows, use
+[Git for Windows](https://git-scm.com/download/win). Every command
+below runs from this `aprswolf` folder.
+
 ### Install
 
 ```bash
@@ -269,7 +294,28 @@ source ~/.cargo/env.fish     # fish
 ```
 
 On a Mac that installed rustup through Homebrew, recheck the PATH line
-for your shell under Setup instead.
+for your shell under [macOS](#macos) instead.
+
+`npm run play` starts a development session with live reload. It
+doesn't produce an app you can install.
+
+## Build an installer
+
+Each command builds the installers for the OS it runs on, the same
+files the [Download](#download) table lists:
+
+```bash
+npm run release:macos:universal   # macOS: universal .dmg
+npm run release:linux             # Linux: .deb, .rpm and .AppImage
+npm run release:windows           # Windows (PowerShell): .msi and setup .exe
+```
+
+The macOS `.dmg` is written to
+`src-tauri/target/universal-apple-darwin/release/bundle/dmg/`
+(`npm run release:macos:open` opens that folder). Linux builds are
+collected in `dist-linux/` and Windows builds in `dist-windows/`.
+`npm run release:macos` builds separate Intel and Apple Silicon DMGs
+instead.
 
 ## Scripts
 
@@ -307,19 +353,6 @@ Backend compile check:
 cd src-tauri
 cargo check
 ```
-
-## Troubleshooting
-
-- No replies from bots:
-  Verify "Message To" is the bot callsign and path is valid for your RF area.
-- App layout jumps or grows:
-  Traffic Log should stay off by default; if enabled, it scrolls internally.
-- Connection succeeds but no decode events:
-  Verify the RX socket endpoint and that Dire Wolf is configured to allow AGW TCP connections.
-- Can't connect to Dire Wolf:
-  Ensure Dire Wolf is running on the target host and that your network allows TCP traffic to
-  the configured AGW/KISS port. On the Dire Wolf host, check `AGWPORT` and `KISSPORT` settings
-  in `direwolf.conf`.
 
 ## For maintainers
 
