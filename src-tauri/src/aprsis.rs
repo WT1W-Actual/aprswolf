@@ -14,7 +14,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager};
 use tauri::async_runtime::JoinHandle;
-use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
+use tokio::io::{AsyncBufRead, AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::net::TcpStream;
 use tokio::sync::{mpsc, Mutex};
 
@@ -80,6 +80,21 @@ fn normalize_aprsis_filter(filter: &str) -> String {
         .collect::<String>()
         .trim()
         .to_string()
+}
+
+/// Read one APRS-IS line, capped at `MAX_APRSIS_LINE_BYTES`.
+///
+/// Reads raw bytes rather than a String: `read_line` fails with
+/// `InvalidData` on any non-UTF-8 byte, which used to end the whole
+/// session. APRS-IS relays packets from many clients, some sending Latin-1
+/// or other 8-bit text, so the line is decoded lossily instead.
+async fn read_aprsis_line<R: AsyncBufRead + Unpin>(reader: &mut R) -> std::io::Result<(usize, String)> {
+    let mut raw = Vec::new();
+    let n = reader
+        .take(MAX_APRSIS_LINE_BYTES)
+        .read_until(b'\n', &mut raw)
+        .await?;
+    Ok((n, String::from_utf8_lossy(&raw).into_owned()))
 }
 
 #[derive(Clone, Default)]
@@ -304,14 +319,7 @@ pub async fn connect_aprsis(
                     }
                 }
 
-                read_result = async {
-                    let mut line = String::new();
-                    (&mut line_reader)
-                        .take(MAX_APRSIS_LINE_BYTES)
-                        .read_line(&mut line)
-                        .await
-                        .map(|n| (n, line))
-                } => {
+                read_result = read_aprsis_line(&mut line_reader) => {
                     match read_result {
                         Ok((0, _)) => {
                             emit_status(
@@ -392,14 +400,12 @@ pub async fn connect_aprsis(
 
                                     // If this is an APRS message addressed to us, send an ACK back.
                                     if let Some(ref info_text) = aprs_info {
+                                        let allow_base_callsign = crate::settings::load_settings(app_clone.clone()).promiscuous_base_callsign;
+                                        for ack_id in crate::tnc::ack_ids_for_station(info_text, &callsign_norm, allow_base_callsign) {
+                                            let tnc_state = app_clone.state::<crate::tnc::AppState>().inner().clone();
+                                            let _ = crate::tnc::mark_acked(&app_clone, &tnc_state, &ack_id, aprs_source.as_deref().unwrap_or("")).await;
+                                        }
                                         if let Some(aprs_msg) = parse_aprs_message(info_text) {
-                                            if let Some(ref msgid) = aprs_msg.msgid {
-                                                if let Some((_, Some(reply_ack))) = crate::tnc::split_reply_ack_id(msgid) {
-                                                    let tnc_state = app_clone.state::<crate::tnc::AppState>().inner().clone();
-                                                    let _ = crate::tnc::mark_acked(&app_clone, &tnc_state, reply_ack, aprs_source.as_deref().unwrap_or("")).await;
-                                                }
-                                            }
-                                            let allow_base_callsign = crate::settings::load_settings(app_clone.clone()).promiscuous_base_callsign;
                                             if crate::tnc::callsign_matches_station(&aprs_msg.addressee, &callsign_norm, allow_base_callsign) {
                                                 crate::runtime::maybe_play_addressed_message_sound(&app_clone, &aprs_msg.text);
                                                 if let Some(ref msgid) = aprs_msg.msgid {
@@ -413,13 +419,6 @@ pub async fn connect_aprsis(
                                                         let _ = w.write_all(ack_line.as_bytes()).await;
                                                         let _ = w.flush().await;
                                                     }
-                                                }
-                                            }
-                                            // Check if this is an incoming ACK for one of our sent messages.
-                                            if aprs_msg.msgid.is_none() && aprs_msg.text.to_lowercase().starts_with("ack") {
-                                                if let Some(ack_id_str) = crate::tnc::parse_ack_id(&aprs_msg.text) {
-                                                    let tnc_state = app_clone.state::<crate::tnc::AppState>().inner().clone();
-                                                    let _ = crate::tnc::mark_acked(&app_clone, &tnc_state, &ack_id_str, aprs_source.as_deref().unwrap_or("")).await;
                                                 }
                                             }
                                         }
@@ -443,6 +442,7 @@ pub async fn connect_aprsis(
         emit_status(&app_clone, "aprsis_disconnected", None);
         if epoch_ref.load(Ordering::SeqCst) == epoch {
             *handle_slot.lock().await = None;
+            crate::tnc::stop_background_tasks(&tnc_state_for_task).await;
         }
     });
 
@@ -505,7 +505,19 @@ pub async fn disconnect_aprsis_for_app(app: AppHandle) -> Result<(), String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{normalize_aprsis_filter, parse_tnc2, unwrap_third_party};
+    use super::{normalize_aprsis_filter, parse_tnc2, read_aprsis_line, unwrap_third_party};
+
+    #[tokio::test]
+    async fn read_aprsis_line_survives_non_utf8_bytes() {
+        // 0xE9 is "é" in Latin-1 and is not valid UTF-8 on its own.
+        let input: &[u8] = b"N0CALL>APRS:>caf\xE9\r\nN0CALL>APRS:>next\r\n";
+        let mut reader = input;
+        let (n, first) = read_aprsis_line(&mut reader).await.expect("first line reads");
+        assert!(n > 0);
+        assert!(first.starts_with("N0CALL>APRS:>caf\u{FFFD}"));
+        let (_, second) = read_aprsis_line(&mut reader).await.expect("second line reads");
+        assert_eq!(second.trim_end(), "N0CALL>APRS:>next");
+    }
 
     #[test]
     fn normalize_filter_strips_command_prefix_and_newlines() {

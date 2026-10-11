@@ -93,6 +93,20 @@ impl Default for AppSettings {
     }
 }
 
+/// Write `contents` to `path` without ever leaving a half-written file.
+///
+/// The data goes to a temporary file beside the target, which is then
+/// renamed over it. A rename within one directory is atomic, so a crash or
+/// power cut mid-write leaves either the old file or the new one, never a
+/// truncated mix that fails to parse.
+fn write_atomic(path: &std::path::Path, contents: &str) -> std::io::Result<()> {
+    let mut tmp_name = path.file_name().unwrap_or_default().to_os_string();
+    tmp_name.push(".tmp");
+    let tmp_path = path.with_file_name(tmp_name);
+    fs::write(&tmp_path, contents)?;
+    fs::rename(&tmp_path, path)
+}
+
 fn settings_path(app: &AppHandle) -> Result<std::path::PathBuf, String> {
     let dir = app
         .path()
@@ -132,7 +146,7 @@ fn extract_aprs_message_text(info_text: &str) -> String {
 
 fn normalize_ack_display_body(body: &str) -> Option<String> {
     let trimmed = body.trim();
-    if trimmed.len() < 3 || !trimmed[..3].eq_ignore_ascii_case("ack") {
+    if !trimmed.get(..3).is_some_and(|p| p.eq_ignore_ascii_case("ack")) {
         return None;
     }
 
@@ -208,14 +222,18 @@ fn is_aprs_weather_report(body: &str) -> bool {
     let starts_with_position = matches!(bytes.first(), Some(b'!') | Some(b'='));
     let starts_with_timestamped_position = matches!(bytes.first(), Some(b'@') | Some(b'/'));
 
+    // Uncompressed layout: data type (1), latitude "4903.50N" (8), symbol
+    // table (1), longitude "07201.75W" (9), symbol code (1). The table sits
+    // at byte 9 and the symbol code at byte 19; a timestamp ("092345z", 7)
+    // pushes both 7 bytes later. A weather station's symbol code is '_'.
+    let is_symbol_table = |ch: &u8| ch.is_ascii_alphanumeric() || *ch == b'/' || *ch == b'\\';
+
     if starts_with_position {
-        return bytes.get(8).map(|ch| ch.is_ascii_alphabetic() || ch.is_ascii_digit() || *ch == b'/' || *ch == b'\\') == Some(true)
-            && bytes.get(18) == Some(&b'_');
+        return bytes.get(9).is_some_and(is_symbol_table) && bytes.get(19) == Some(&b'_');
     }
 
     if starts_with_timestamped_position {
-        return bytes.get(15).map(|ch| ch.is_ascii_alphabetic() || ch.is_ascii_digit() || *ch == b'/' || *ch == b'\\') == Some(true)
-            && bytes.get(25) == Some(&b'_');
+        return bytes.get(16).is_some_and(is_symbol_table) && bytes.get(26) == Some(&b'_');
     }
 
     false
@@ -411,7 +429,7 @@ pub fn save_settings(app: AppHandle, settings: serde_json::Value) -> Result<(), 
     let path = settings_path(&app)?;
     let json = serde_json::to_string_pretty(&merged_settings)
         .map_err(|err| format!("failed to serialize settings: {err}"))?;
-    fs::write(&path, json).map_err(|err| format!("failed to write settings file: {err}"))?;
+    write_atomic(&path, &json).map_err(|err| format!("failed to write settings file: {err}"))?;
     // Only cache after a successful write so the cache never diverges from disk.
     *settings_cache().write().unwrap() = Some(merged_settings.clone());
     app.emit("settings_updated", merged_settings)
@@ -477,7 +495,7 @@ pub fn save_received_messages(
     *received_cache().write().unwrap() = Some(messages.clone());
     let json = serde_json::to_string_pretty(&messages)
         .map_err(|err| format!("failed to serialize received messages: {err}"))?;
-    fs::write(dir.join(RECEIVED_MESSAGES_FILE), json)
+    write_atomic(&dir.join(RECEIVED_MESSAGES_FILE), &json)
         .map_err(|err| format!("failed to write received messages file: {err}"))
 }
 
@@ -516,7 +534,7 @@ fn schedule_received_flush(app: AppHandle) {
                 let snapshot = received_cache().read().unwrap().clone().unwrap_or_default();
                 if let Ok(dir) = worker_app.path().app_data_dir() {
                     if let Ok(json) = serde_json::to_string_pretty(&snapshot) {
-                        let _ = fs::write(dir.join(RECEIVED_MESSAGES_FILE), json);
+                        let _ = write_atomic(&dir.join(RECEIVED_MESSAGES_FILE), &json);
                     }
                 }
                 // Any notify that arrived during the sleep leaves a permit, so
@@ -531,7 +549,21 @@ fn schedule_received_flush(app: AppHandle) {
 
 #[cfg(test)]
 mod tests {
-    use super::normalize_received_message;
+    use super::{normalize_received_message, write_atomic};
+
+    #[test]
+    fn write_atomic_replaces_the_file_and_leaves_no_temp_behind() {
+        let dir = std::env::temp_dir().join(format!("aprswolf-write-atomic-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("settings.json");
+        std::fs::write(&path, "{\"old\":true}").unwrap();
+
+        write_atomic(&path, "{\"new\":true}").unwrap();
+
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "{\"new\":true}");
+        assert!(!dir.join("settings.json.tmp").exists());
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
     use serde_json::{json, Value};
 
     #[test]
@@ -563,6 +595,30 @@ mod tests {
 
         let normalized = normalize_received_message(value);
         assert_eq!(normalized.get("body").and_then(Value::as_str), Some("ack12"));
+    }
+
+    #[test]
+    fn normalize_received_message_does_not_panic_on_multibyte_body() {
+        for body in [":WT1W-15  :a€", ":WT1W-15  :ab€", ":WT1W-15  :a\u{FFFD}x"] {
+            let normalized = normalize_received_message(json!({ "body": body }));
+            assert!(normalized.get("body").and_then(Value::as_str).is_some());
+        }
+    }
+
+    #[test]
+    fn uncompressed_weather_reports_are_classified_as_wx() {
+        // Weather stations in the uncompressed position layout, without and
+        // with a timestamp.
+        for body in [
+            "!4903.50N/07201.75W_220/004g005t077r000p000P000h50b09900",
+            "@092345z4903.50N/07201.75W_220/004g005t077r000p000P000h50b09900",
+        ] {
+            let normalized = normalize_received_message(json!({ "body": body }));
+            assert_eq!(normalized.get("aprsType").and_then(Value::as_str), Some("wx"), "{body}");
+        }
+        // A plain house symbol at the same offsets is a position, not weather.
+        let normalized = normalize_received_message(json!({ "body": "!4903.50N/07201.75W-Test" }));
+        assert_eq!(normalized.get("aprsType").and_then(Value::as_str), Some("pos"));
     }
 
     #[test]

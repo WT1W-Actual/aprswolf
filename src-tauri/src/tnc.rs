@@ -308,9 +308,11 @@ fn validate_aprs_message_text(text: &str) -> Result<(), String> {
 pub fn parse_ack_id(text: &str) -> Option<String> {
     let trimmed = text.trim();
     // Accept both "ACK:" (with colon, any case) and "ack"/"ACK" (without colon, any case).
-    let ack_part = if trimmed.len() >= 4 && trimmed[..4].eq_ignore_ascii_case("ack:") {
+    // `get` returns None instead of panicking when the cut would fall inside
+    // a multibyte character, which received packets can contain.
+    let ack_part = if trimmed.get(..4).is_some_and(|p| p.eq_ignore_ascii_case("ack:")) {
         &trimmed[4..]
-    } else if trimmed.len() >= 3 && trimmed[..3].eq_ignore_ascii_case("ack") {
+    } else if trimmed.get(..3).is_some_and(|p| p.eq_ignore_ascii_case("ack")) {
         &trimmed[3..]
     } else {
         return None;
@@ -407,11 +409,34 @@ fn build_queued_message_payloads(
     })
 }
 
-fn parse_aprs_message_ack(info_text: &str) -> Option<String> {
-    let trimmed = info_text.trim();
-    let (_, payload) = trimmed.split_once(':')?;
-    let (_, message_text) = payload.split_once(':')?;
-    parse_ack_id(message_text)
+/// Message ids that `info_text` acknowledges on behalf of `station`.
+///
+/// An APRS ack is a message addressed to the station whose message it
+/// confirms, so anything addressed elsewhere is ignored: another station's
+/// `ack07` must not clear our own message 07 to the same sender. Two forms
+/// count: a plain `ackNN` message, and the reply-ack half of an incoming
+/// message id (`{MM}AA` acknowledges our `AA`).
+pub(crate) fn ack_ids_for_station(info_text: &str, station: &str, allow_base_callsign: bool) -> Vec<String> {
+    let Some(aprs_msg) = parse_aprs_message(info_text.trim()) else {
+        return Vec::new();
+    };
+    if !callsign_matches_station(&aprs_msg.addressee, station, allow_base_callsign) {
+        return Vec::new();
+    }
+    let mut ids = Vec::new();
+    match aprs_msg.msgid.as_deref() {
+        None => {
+            if let Some(id) = parse_ack_id(&aprs_msg.text) {
+                ids.push(id);
+            }
+        }
+        Some(msgid) => {
+            if let Some((_, Some(reply_ack))) = split_reply_ack_id(msgid) {
+                ids.push(reply_ack.to_string());
+            }
+        }
+    }
+    ids
 }
 
 pub(crate) fn callsign_matches_station(addressee: &str, station: &str, allow_base_callsign: bool) -> bool {
@@ -528,6 +553,17 @@ pub async fn start_periodic_beacon(app: &AppHandle, state: &AppState) {
         "tx_debug",
         Some(format!("periodic beacon started (every {interval_secs}s)")),
     );
+}
+
+/// Stop the periodic beacon and the retry loop when a connection ends on
+/// its own (server closed, network error). A manual disconnect already does
+/// this; without it the beacon timer kept firing into a dead connection
+/// and logging an error every interval.
+pub(crate) async fn stop_background_tasks(state: &AppState) {
+    stop_periodic_beacon(state).await;
+    if let Some(retry_task) = state.retry_task.lock().await.take() {
+        retry_task.abort();
+    }
 }
 
 /// Cancel the periodic beacon task if one is running.
@@ -820,45 +856,22 @@ pub async fn mark_acked(
     Ok(())
 }
 
-async fn mark_delivered_by_payload(
-    app: &AppHandle,
-    state: &AppState,
-    source: &str,
-    destination: &str,
-    body: &str,
-) -> Result<bool, String> {
-    let source_norm = source.trim().to_uppercase();
-    let destination_norm = destination.trim().to_uppercase();
-    let body_norm = body.trim().to_string();
-
-    let mut queue = state.queue.lock().await;
-    let Some(item) = queue.iter_mut().find(|msg| {
-        msg.status != DeliveryState::Acked
-            && msg.status != DeliveryState::Expired
-            && msg.source == source_norm
-            && msg.destination == destination_norm
-            && msg.body == body_norm
-    }) else {
-        return Ok(false);
-    };
-
-    item.status = DeliveryState::Acked;
-    item.next_retry_at_ms = None;
-    item.last_error = None;
-    let snapshot = item.clone();
-    drop(queue);
-
-    persist_queue(state).await?;
-    emit_delivery(app, &snapshot, Some("confirmed by self-heard transmit".to_string()));
-    Ok(true)
-}
-
 fn format_callsign(address: &ParsedAddress) -> String {
     if address.ssid == 0 {
         address.callsign.clone()
     } else {
         format!("{}-{}", address.callsign, address.ssid)
     }
+}
+
+/// True for AGWPE monitor text such as `" 1:Fm W1AW To APRS Via WIDE1-1
+/// <UI pid=F0 Len=12 >[12:00:00]"`: a port number, a colon, then "Fm ".
+/// Graywolf's 'U' frames are TNC2 lines (`W1AW>APRS,WIDE1-1:...`) and
+/// don't match.
+fn is_agwpe_monitor_text(text: &str) -> bool {
+    let trimmed = text.trim_start();
+    let digits = trimmed.chars().take_while(|c| c.is_ascii_digit()).count();
+    digits > 0 && trimmed[digits..].starts_with(":Fm ")
 }
 
 pub(crate) fn parse_tnc2_protocol_view(line: &str) -> Option<(String, String, Vec<String>, String)> {
@@ -962,7 +975,7 @@ async fn write_kiss_frame(
 
 /// Process a single AGW frame from the TNC receiver.
 /// Handles K-frames (AX.25 parsing, ACK detection, auto-reply, UI events)
-/// and T-frames (Dire Wolf monitor reports for delivery confirmation).
+/// and T-frames (Dire Wolf reports of our own transmissions, logged only).
 async fn process_agw_frame(
     agw_frame: AgwFrame,
     app: &AppHandle,
@@ -1007,18 +1020,11 @@ async fn process_agw_frame(
                     (format_callsign(&ax25_payload.source), info_text.clone())
                 };
 
-                if let Some(ack_id) = parse_ack_id(&aprs_info) {
-                    let _ = mark_acked(app, state, &ack_id, &aprs_source).await;
-                } else if let Some(ack_id) = parse_aprs_message_ack(&aprs_info) {
+                let settings = crate::settings::load_settings(app.clone());
+                for ack_id in ack_ids_for_station(&aprs_info, my_callsign, settings.promiscuous_base_callsign) {
                     let _ = mark_acked(app, state, &ack_id, &aprs_source).await;
                 }
                 if let Some(aprs_msg) = parse_aprs_message(&aprs_info) {
-                    if let Some(ref msgid) = aprs_msg.msgid {
-                        if let Some((_, Some(reply_ack))) = split_reply_ack_id(msgid) {
-                            let _ = mark_acked(app, state, reply_ack, &aprs_source).await;
-                        }
-                    }
-                    let settings = crate::settings::load_settings(app.clone());
                     if callsign_matches_station(
                         &aprs_msg.addressee,
                         my_callsign,
@@ -1061,6 +1067,16 @@ async fn process_agw_frame(
         // text data (e.g. "SRC>DST,PATH:info text\r").
         let monitor_text = String::from_utf8_lossy(&agw_frame.data).to_string();
         let tnc2_line = monitor_text.trim_matches(|c| c == '\r' || c == '\0');
+        if is_agwpe_monitor_text(tnc2_line) {
+            // Dire Wolf sends every received packet twice once both raw ('k')
+            // and monitor ('m') delivery are on: as a raw 'K' frame, handled
+            // above, and as a 'U' frame in AGWPE's human-readable monitor
+            // format. That format isn't TNC2, so parsing it here produced a
+            // second, garbled copy of the packet. The 'K' copy is the one we
+            // keep.
+            emit_status(app, "rx_debug", Some(format!("{debug_detail} [monitor-format U frame skipped; raw K frame carries the packet]")));
+            return;
+        }
         emit_status(
             app,
             "rx_debug",
@@ -1073,18 +1089,11 @@ async fn process_agw_frame(
         if let Some((aprs_source, _dest, _path, info_text)) =
             parse_tnc2_protocol_view(tnc2_line)
         {
-            if let Some(ack_id) = parse_ack_id(&info_text) {
-                let _ = mark_acked(app, state, &ack_id, &aprs_source).await;
-            } else if let Some(ack_id) = parse_aprs_message_ack(&info_text) {
+            let settings = crate::settings::load_settings(app.clone());
+            for ack_id in ack_ids_for_station(&info_text, my_callsign, settings.promiscuous_base_callsign) {
                 let _ = mark_acked(app, state, &ack_id, &aprs_source).await;
             }
             if let Some(aprs_msg) = parse_aprs_message(&info_text) {
-                if let Some(ref msgid) = aprs_msg.msgid {
-                    if let Some((_, Some(reply_ack))) = split_reply_ack_id(msgid) {
-                        let _ = mark_acked(app, state, reply_ack, &aprs_source).await;
-                    }
-                }
-                let settings = crate::settings::load_settings(app.clone());
                 if callsign_matches_station(
                     &aprs_msg.addressee,
                     my_callsign,
@@ -1158,27 +1167,11 @@ async fn process_agw_frame(
                 monitor_text.trim_end_matches('\0')
             )),
         );
-        if let Some((header, body)) = monitor_text.split_once('\r') {
-            let payload_body = body.trim_matches(|c| c == '\r' || c == '\0');
-            if let Some((_src_part, rest)) = header.split_once(":Fm ") {
-                if let Some((source_part, after_to)) = rest.split_once(" To ") {
-                    let destination_part = after_to.split(" Via ").next().unwrap_or(after_to).trim();
-                    if let Some(aprs_msg) = parse_aprs_message(payload_body) {
-                        let _ =
-                            mark_delivered_by_payload(app, state, source_part.trim(), &aprs_msg.addressee, &aprs_msg.text).await;
-                    } else {
-                        let _ = mark_delivered_by_payload(
-                            app,
-                            state,
-                            source_part.trim(),
-                            destination_part,
-                            payload_body,
-                        )
-                        .await;
-                    }
-                }
-            }
-        }
+        // A 'T' frame is Dire Wolf telling us it put one of our own frames
+        // on the air. That proves the frame was transmitted, not that the
+        // other station received it, so it must not change delivery state.
+        // Only an ack from the addressee marks a message Acked; until
+        // then the retry task keeps resending.
     } else {
         emit_status(app, "rx_debug", Some(debug_detail));
     }
@@ -1297,10 +1290,11 @@ pub async fn connect_tnc(
         {
             let mut writer_lock = rx_writer.lock().await;
             if let Some(ref mut writer) = *writer_lock {
-                // Build registration frames for both Dire Wolf and Graywolf.
-                // Each TNC recognizes a different register command:
-                //   R = register callsign (Dire Wolf)
-                //   X = register callsign (Graywolf)
+                // In the AGWPE protocol, which both Dire Wolf and Graywolf
+                // follow:
+                //   R = request the server's version number (the callsign
+                //       bytes in this frame are ignored)
+                //   X = register our callsign
                 let mut r_frame = [0u8; AGW_HEADER_LEN];
                 r_frame[4] = b'R';
                 let call_bytes = my_call_for_task.as_bytes();
@@ -1319,8 +1313,8 @@ pub async fn connect_tnc(
                 let m_frame = build_startup_command_frames()[3]; // m
 
                 let startup_cmds: &[&[u8]] = &[
-                    &r_frame,  // Dire Wolf register (R)
-                    &x_frame,  // Graywolf register (X)
+                    &r_frame,  // version request (R)
+                    &x_frame,  // callsign registration (X)
                     build_startup_command_frames()[1], // G (port info)
                     k_frame,   // Dire Wolf monitor start (k)
                     m_frame,   // Graywolf monitor start (m)
@@ -1457,6 +1451,8 @@ pub async fn connect_tnc(
         if epoch_ref.load(Ordering::SeqCst) == current_epoch {
             let mut client_lock = client_slot.lock().await;
             *client_lock = None;
+            drop(client_lock);
+            stop_background_tasks(&state_for_task).await;
         }
     });
 
@@ -1768,7 +1764,7 @@ pub fn get_manual_beacon_cooldown_remaining(app: AppHandle) -> u64 {
 
 #[cfg(test)]
 mod tests {
-    use super::{build_queued_message_payloads, callsign_matches_station, parse_ack_id, parse_aprs_message_ack, parse_ax25_station, parse_digipeater_path, resolve_uncompressed_symbol, split_reply_ack_id, strip_crlf, validate_aprs_message_text, validate_ax25_callsign, validate_position, validate_uncompressed_position_comment, APRS_TOCALL};
+    use super::{build_queued_message_payloads, callsign_matches_station, ack_ids_for_station, is_agwpe_monitor_text, parse_ack_id, parse_ax25_station, parse_digipeater_path, resolve_uncompressed_symbol, split_reply_ack_id, strip_crlf, validate_aprs_message_text, validate_ax25_callsign, validate_position, validate_uncompressed_position_comment, APRS_TOCALL};
     use crate::ax25::build_aprs_position_info;
 
     #[test]
@@ -1809,6 +1805,14 @@ mod tests {
     }
 
     #[test]
+    fn parse_ack_id_does_not_panic_on_multibyte_input() {
+        let lossy = String::from_utf8_lossy(&[b'a', 0xFF, b'x']).to_string();
+        for input in ["a€", "ab€", "ack€", lossy.as_str()] {
+            assert_eq!(parse_ack_id(input), None);
+        }
+    }
+
+    #[test]
     fn parse_ack_id_rejects_empty() {
         // Just "ack" or "ACK:" with nothing after should be rejected
         assert_eq!(parse_ack_id("ack"), None);
@@ -1824,16 +1828,33 @@ mod tests {
     }
 
     #[test]
-    fn parse_aprs_message_ack_alphanumeric() {
-        // Test parsing a full APRS message info field that is an ACK with alphanumeric ID
-        let info = ":W1XYZ    :ackAB1";
-        assert_eq!(parse_aprs_message_ack(info), Some("AB1".to_string()));
+    fn agwpe_monitor_text_is_told_apart_from_tnc2() {
+        // Dire Wolf's monitor format, as its server.c documents it.
+        assert!(is_agwpe_monitor_text(" 1:Fm ZL4FOX-8 To Q7P2U2 <UI pid=F0 Len=28 >[08:25:07]\r`I1*l V>/\"9<}[:Barts Tracker"));
+        assert!(is_agwpe_monitor_text("1:Fm W1AW To APRS Via WIDE1-1 <UI pid=F0 Len=5 >[12:00:00]\rhello"));
+        // Graywolf's TNC2 lines must still be parsed.
+        assert!(!is_agwpe_monitor_text("W1AW>APRS,WIDE1-1:hello"));
+        assert!(!is_agwpe_monitor_text("W1AW-9>APRS::WT1W-15  :Fm the field{12"));
+    }
 
-        let info2 = ":DEST     :ack42";
-        assert_eq!(parse_aprs_message_ack(info2), Some("42".to_string()));
+    #[test]
+    fn ack_ids_for_station_reads_acks_addressed_to_us() {
+        assert_eq!(ack_ids_for_station(":W1XYZ    :ackAB1", "W1XYZ", false), vec!["AB1"]);
+        assert_eq!(ack_ids_for_station(":W1XYZ    :ack42", "W1XYZ", false), vec!["42"]);
+        assert_eq!(ack_ids_for_station(":W1XYZ    :ack12}34", "W1XYZ", false), vec!["12"]);
+        // Reply-ack: an incoming message {MM}AA acknowledges our AA.
+        assert_eq!(ack_ids_for_station(":W1XYZ    :hello{05}07", "W1XYZ", false), vec!["07"]);
+    }
 
-        let info3 = ":DEST     :ack12}34";
-        assert_eq!(parse_aprs_message_ack(info3), Some("12".to_string()));
+    #[test]
+    fn ack_ids_for_station_ignores_acks_to_other_stations() {
+        assert!(ack_ids_for_station(":K2ABC    :ack07", "W1XYZ", false).is_empty());
+        assert!(ack_ids_for_station(":K2ABC    :hello{05}07", "W1XYZ", false).is_empty());
+        // Another SSID of ours counts only when base-callsign matching is on.
+        assert!(ack_ids_for_station(":W1XYZ-7  :ack07", "W1XYZ-9", false).is_empty());
+        assert_eq!(ack_ids_for_station(":W1XYZ-7  :ack07", "W1XYZ-9", true), vec!["07"]);
+        // A bare "ack07" info field names no addressee, so it can't be matched.
+        assert!(ack_ids_for_station("ack07", "W1XYZ", false).is_empty());
     }
 
     #[test]

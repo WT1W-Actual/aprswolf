@@ -23,6 +23,8 @@ pub const DEFAULT_WEB_SERVER_PORT: u16 = 18420;
 
 pub struct WebServerHandle {
     port: u16,
+    /// True when bound to loopback only (no token was configured at start).
+    loopback_only: bool,
     shutdown_tx: Option<oneshot::Sender<()>>,
     task: JoinHandle<()>,
 }
@@ -80,7 +82,10 @@ struct ApiError {
     error: String,
 }
 
-fn local_url(port: u16) -> String {
+fn local_url(port: u16, loopback_only: bool) -> String {
+    if loopback_only {
+        return format!("http://127.0.0.1:{}", port);
+    }
     match local_ip() {
         Ok(ip) => format!("http://{}:{}", ip, port),
         Err(_) => format!("http://127.0.0.1:{}", port),
@@ -94,7 +99,7 @@ fn current_status(app: &AppHandle) -> WebServerStatus {
         WebServerStatus {
             enabled: true,
             port: Some(handle.port),
-            url: Some(local_url(handle.port)),
+            url: Some(local_url(handle.port, handle.loopback_only)),
         }
     } else {
         WebServerStatus {
@@ -162,7 +167,7 @@ async fn require_token(
         Err(StatusCode::FORBIDDEN) => (
             StatusCode::FORBIDDEN,
             Json(ApiError {
-                error: "web server token not configured; set it in Preferences before using remote access from other devices".to_string(),
+                error: "web server token not configured; set it in Preferences and restart the remote before using it from other devices".to_string(),
             }),
         )
             .into_response(),
@@ -173,6 +178,75 @@ async fn require_token(
             }),
         )
             .into_response(),
+    }
+}
+
+// ── Host / Origin checks ────────────────────────────────────
+
+/// Strip an optional `:port` from a Host value, keeping IPv6 brackets off.
+fn host_without_port(host: &str) -> &str {
+    let host = host.trim();
+    if let Some(rest) = host.strip_prefix('[') {
+        return rest.split(']').next().unwrap_or(rest);
+    }
+    match host.rsplit_once(':') {
+        Some((name, port)) if port.chars().all(|c| c.is_ascii_digit()) => name,
+        _ => host,
+    }
+}
+
+/// A Host header is trusted when it names this machine directly: an IP
+/// address, `localhost`, or an mDNS `.local` name. DNS rebinding needs a
+/// public hostname the attacker controls, so it can never pass this check.
+fn host_is_trusted(host: &str) -> bool {
+    let name = host_without_port(host).to_ascii_lowercase();
+    name.parse::<std::net::IpAddr>().is_ok()
+        || name == "localhost"
+        || name.ends_with(".local")
+}
+
+/// Decide whether a request may reach the server at all.
+///
+/// - The Host header must be trusted (blocks DNS rebinding).
+/// - A request carrying an Origin header must come from the same host and
+///   port it is addressed to (blocks other web pages posting to the API).
+///   Requests with no Origin, such as curl, are left to the token check.
+fn request_allowed(host: Option<&str>, origin: Option<&str>) -> bool {
+    let Some(host) = host else {
+        return false;
+    };
+    if !host_is_trusted(host) {
+        return false;
+    }
+    match origin {
+        None => true,
+        Some(origin) => {
+            let origin_host = origin
+                .strip_prefix("http://")
+                .or_else(|| origin.strip_prefix("https://"))
+                .unwrap_or("");
+            origin_host.eq_ignore_ascii_case(host.trim())
+        }
+    }
+}
+
+async fn require_same_origin(
+    request: axum::http::Request<axum::body::Body>,
+    next: Next,
+) -> Response {
+    let headers = request.headers();
+    let host = headers.get(header::HOST).and_then(|v| v.to_str().ok());
+    let origin = headers.get(header::ORIGIN).and_then(|v| v.to_str().ok());
+    if request_allowed(host, origin) {
+        next.run(request).await
+    } else {
+        (
+            StatusCode::FORBIDDEN,
+            Json(ApiError {
+                error: "request rejected: unrecognized Host or cross-site Origin".to_string(),
+            }),
+        )
+            .into_response()
     }
 }
 
@@ -376,7 +450,15 @@ pub async fn enable_web_server_internal(app: AppHandle, port: u16) -> Result<Web
         return Err("Web server is already enabled".to_string());
     }
 
-    let listener = TcpListener::bind(("0.0.0.0", port))
+    // With no token configured only loopback callers are authorized anyway,
+    // so don't listen on the network at all. Set a token in Preferences and
+    // restart the remote to reach it from other devices.
+    let loopback_only = settings::load_settings(app.clone())
+        .web_server_token
+        .trim()
+        .is_empty();
+    let bind_addr = if loopback_only { "127.0.0.1" } else { "0.0.0.0" };
+    let listener = TcpListener::bind((bind_addr, port))
         .await
         .map_err(|err| format!("failed to bind web server on port {port}: {err}"))?;
 
@@ -402,6 +484,7 @@ pub async fn enable_web_server_internal(app: AppHandle, port: u16) -> Result<Web
     let router = Router::new()
         .route("/", get(index_handler))
         .merge(api)
+        .layer(middleware::from_fn(require_same_origin))
         .with_state(HttpState { app: app.clone() });
 
     let task = tauri::async_runtime::spawn(async move {
@@ -426,6 +509,7 @@ pub async fn enable_web_server_internal(app: AppHandle, port: u16) -> Result<Web
     let mut handle_lock = state.handle.lock().unwrap();
     *handle_lock = Some(WebServerHandle {
         port,
+        loopback_only,
         shutdown_tx: Some(shutdown_tx),
         task,
     });
@@ -470,7 +554,34 @@ const REMOTE_HTML: &str = include_str!("../remote-control.html");
 
 #[cfg(test)]
 mod tests {
-    use super::{authorize, constant_time_eq};
+    use super::{authorize, constant_time_eq, host_is_trusted, request_allowed};
+
+    #[test]
+    fn trusted_hosts_are_ip_literals_localhost_and_mdns() {
+        assert!(host_is_trusted("127.0.0.1:18420"));
+        assert!(host_is_trusted("192.168.1.20:18420"));
+        assert!(host_is_trusted("[::1]:18420"));
+        assert!(host_is_trusted("localhost:18420"));
+        assert!(host_is_trusted("shack-mac.local:18420"));
+        // A rebinding attack arrives under the attacker's own hostname.
+        assert!(!host_is_trusted("evil.example.com:18420"));
+        assert!(!host_is_trusted("localhost.evil.example.com"));
+    }
+
+    #[test]
+    fn cross_site_origin_is_rejected() {
+        // The remote page itself: same host and port.
+        assert!(request_allowed(Some("127.0.0.1:18420"), Some("http://127.0.0.1:18420")));
+        // No Origin (curl, scripts): left to the token check.
+        assert!(request_allowed(Some("127.0.0.1:18420"), None));
+        // A form on another site posting to the loopback server.
+        assert!(!request_allowed(Some("127.0.0.1:18420"), Some("https://evil.example.com")));
+        // Opaque origins from sandboxed frames or file pages.
+        assert!(!request_allowed(Some("127.0.0.1:18420"), Some("null")));
+        // DNS rebinding: Host is the attacker's name.
+        assert!(!request_allowed(Some("evil.example.com:18420"), Some("http://evil.example.com:18420")));
+        assert!(!request_allowed(None, None));
+    }
 
     #[test]
     fn constant_time_eq_matches_equal_strings_only() {
