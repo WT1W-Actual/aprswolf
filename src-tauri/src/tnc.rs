@@ -555,6 +555,17 @@ pub async fn start_periodic_beacon(app: &AppHandle, state: &AppState) {
     );
 }
 
+/// Stop the periodic beacon and the retry loop when a connection ends on
+/// its own (server closed, network error). A manual disconnect already does
+/// this; without it the beacon timer kept firing into a dead connection
+/// and logging an error every interval.
+pub(crate) async fn stop_background_tasks(state: &AppState) {
+    stop_periodic_beacon(state).await;
+    if let Some(retry_task) = state.retry_task.lock().await.take() {
+        retry_task.abort();
+    }
+}
+
 /// Cancel the periodic beacon task if one is running.
 pub async fn stop_periodic_beacon(state: &AppState) {
     let mut lock = state.periodic_beacon_task.lock().await;
@@ -1439,6 +1450,8 @@ pub async fn connect_tnc(
         if epoch_ref.load(Ordering::SeqCst) == current_epoch {
             let mut client_lock = client_slot.lock().await;
             *client_lock = None;
+            drop(client_lock);
+            stop_background_tasks(&state_for_task).await;
         }
     });
 

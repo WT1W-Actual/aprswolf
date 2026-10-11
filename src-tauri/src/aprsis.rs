@@ -442,6 +442,7 @@ pub async fn connect_aprsis(
         emit_status(&app_clone, "aprsis_disconnected", None);
         if epoch_ref.load(Ordering::SeqCst) == epoch {
             *handle_slot.lock().await = None;
+            crate::tnc::stop_background_tasks(&tnc_state_for_task).await;
         }
     });
 
