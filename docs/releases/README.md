@@ -18,3 +18,14 @@ This folder contains versioned release notes for published APRSWolf builds.
 2. Save it as `docs/releases/X.Y.Z.md`
 3. Fill in the shipped changes, download names, and upgrade notes
 4. Add the new version to the list above
+
+## Multi-Platform Artifacts
+
+Releases are published by the `release` GitHub Actions workflow when a `v*` tag
+is pushed. Each release attaches artifacts for all supported platforms:
+
+- macOS: universal, Intel, and Apple Silicon DMGs
+- Linux: `.deb`, `.rpm`, and `.AppImage` for amd64 and arm64
+- Windows: MSI and NSIS `.exe` for x64
+
+See the [project README](../../README.md#releases) for the full artifact table.

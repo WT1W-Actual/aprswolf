@@ -15,30 +15,56 @@ Tauri + React desktop app for APRS messaging over KISS/AGW TCP (Dire Wolf compat
 
 ## Releases
 
-Typical publish flow for the universal macOS release artifact:
+APRSWolf ships for macOS, Linux, and Windows. The recommended way to publish a
+release is to push a version tag (e.g. `v1.0.0`); the `release` GitHub Actions
+workflow builds every platform and attaches all artifacts to a single GitHub
+Release.
 
-1. Build the universal macOS app and DMG with a clean rebuild of both architectures:
-  `npm run release:macos:universal`
-2. If you also need separate per-architecture DMGs:
-  `npm run release:macos`
+### Download artifacts
 
-Recommended end-user artifact:
+| Platform | Architecture | Artifact |
+|----------|--------------|----------|
+| macOS | Universal (Intel + Apple Silicon) | `APRSWolf_1.0_universal.dmg` |
+| macOS | Intel | `APRSWolf_1.0_x64.dmg` |
+| macOS | Apple Silicon | `APRSWolf_1.0_aarch64.dmg` |
+| Linux | amd64 | `APRSWolf_1.0_amd64.deb`, `APRSWolf-1.0-1.amd64.rpm`, `APRSWolf_1.0_amd64.AppImage` |
+| Linux | arm64 | `APRSWolf_1.0_arm64.deb`, `APRSWolf-1.0-1.arm64.rpm`, `APRSWolf_1.0_arm64.AppImage` |
+| Windows | x64 | `APRSWolf_1.0_x64.msi`, `APRSWolf_1.0_x64-setup.exe` |
 
-- Universal macOS DMG: `src-tauri/target/universal-apple-darwin/release/bundle/dmg/APRSWolf_1.0_universal.dmg`
+### Publishing a release
 
-The universal packaging script now performs a clean rebuild of both macOS architecture targets before merging them, so the DMG does not reuse a stale `.app` bundle.
+1. Bump the version in `package.json` (`version` + `displayVersion`),
+   `src-tauri/Cargo.toml`, and `src-tauri/tauri.conf.json`.
+2. Copy [docs/RELEASE-NOTES-TEMPLATE.md](docs/RELEASE-NOTES-TEMPLATE.md) to
+   `docs/releases/X.Y.Z.md` and fill it in.
+3. Add the new version to [docs/releases/README.md](docs/releases/README.md).
+4. Commit, then push a tag: `git tag v1.0.0 && git push origin v1.0.0`.
+5. The `release` workflow builds all platforms and publishes the GitHub Release.
 
-When publishing a new release:
+### Building locally
 
-1. Copy [docs/RELEASE-NOTES-TEMPLATE.md](docs/RELEASE-NOTES-TEMPLATE.md)
-2. Save it as `docs/releases/X.Y.Z.md`
-3. Fill in the current version and shipped changes
-4. Add the new version to [docs/releases/README.md](docs/releases/README.md)
-5. Publish the universal DMG as the primary download
+macOS (universal DMG):
+
+```bash
+npm run release:macos:universal
+```
+
+Linux (`.deb` + `.rpm` + `.AppImage`, run on Linux):
+
+```bash
+npm run release:linux            # or release:linux:no-tests
+```
+
+Windows (MSI + NSIS `.exe`, run on Windows):
+
+```powershell
+npm run release:windows          # or release:windows:no-tests
+```
 
 Signing and notarization note:
 
 - If you distribute the universal `.app`, sign it after the `lipo` merge step used by the universal packaging script.
+- macOS and Windows artifacts are currently unsigned; add signing secrets to the `release` workflow when ready.
 
 ## What It Does
 
@@ -131,6 +157,9 @@ source ~/.cargo/env
 - npm run release:macos: Build Intel and Apple Silicon DMGs.
 - npm run release:macos:universal: Build a universal macOS app and DMG from the two arch bundles.
 - npm run release:macos:all: Build both per-arch DMGs and the universal macOS DMG.
+- npm run release:linux: Build Linux `.deb` + `.rpm` + `.AppImage` (run on Linux).
+- npm run release:linux:no-tests: Same, skipping tests.
+- npm run release:windows: Build Windows MSI + NSIS `.exe` (run on Windows).
 
 ## Test
 

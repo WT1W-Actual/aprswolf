@@ -18,8 +18,13 @@
     "release:macos:universal": "node scripts/build-macos-universal.cjs",
     "release:macos:all": "npm run release:macos && npm run release:macos:universal",
     "release:macos:open": "open src-tauri/target/universal-apple-darwin/release/bundle/dmg",
-    "release:linux": "bash scripts/build-linux-deb.sh",
-    "release:linux:no-tests": "bash scripts/build-linux-deb.sh --no-tests"
+    "release:linux": "bash scripts/build-linux.sh",
+    "release:linux:no-tests": "bash scripts/build-linux.sh --no-tests",
+    "release:linux:deb": "bash scripts/build-linux.sh --bundles=deb",
+    "release:linux:rpm": "bash scripts/build-linux.sh --bundles=rpm",
+    "release:linux:appimage": "bash scripts/build-linux.sh --bundles=appimage",
+    "release:windows": "powershell -ExecutionPolicy Bypass -File scripts/build-windows.ps1",
+    "release:windows:no-tests": "powershell -ExecutionPolicy Bypass -File scripts/build-windows.ps1 -NoTests"
   },
   "dependencies": {
     "@tauri-apps/api": "^2",

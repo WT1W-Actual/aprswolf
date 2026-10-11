@@ -1,0 +1,276 @@
+name: release
+
+# Builds APRSWolf for macOS, Linux, and Windows and attaches every artifact
+# to a single GitHub Release.
+#
+# Trigger it one of these ways:
+#   1. Push a version tag (e.g. v1.0.0): builds all platforms and creates a
+#      GitHub Release with every artifact attached.
+#   2. Manual: GitHub repo -> Actions -> "release" -> "Run workflow".
+#      (Manual runs upload artifacts only; no Release is created.)
+#
+# Artifacts produced:
+#   macOS   : APRSWolf_<ver>_universal.dmg, _x64.dmg, _aarch64.dmg
+#   Linux   : APRSWolf_<ver>_amd64.deb / _arm64.deb
+#             APRSWolf-<ver>-1.amd64.rpm / -1.arm64.rpm
+#             APRSWolf_<ver>_amd64.AppImage / _arm64.AppImage
+#   Windows : APRSWolf_<ver>_x64.msi, APRSWolf_<ver>_x64.exe (NSIS)
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  # ───────────────────────────────────────────────────────────
+  # macOS — per-architecture DMGs + a universal DMG
+  # ───────────────────────────────────────────────────────────
+  macos:
+    name: macOS (${{ matrix.label }})
+    runs-on: macos-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: x64
+            target: x86_64-apple-darwin
+          - label: arm64
+            target: aarch64-apple-darwin
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: lts/*
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Build DMG (${{ matrix.label }})
+        run: npm run tauri build -- --bundles dmg --target ${{ matrix.target }}
+
+      - name: Rename DMG to display-version form
+        env:
+          TARGET: ${{ matrix.target }}
+          LABEL: ${{ matrix.label }}
+        run: |
+          DMG=$(ls -t "src-tauri/target/$TARGET/release/bundle/dmg"/*.dmg | head -1)
+          DISPLAY_VERSION=$(node -e '
+            const p = require("./package.json");
+            const v = p.displayVersion || p.version;
+            const m = String(v).match(/^(\d+)\.(\d+)\.(\d+)$/);
+            if (m) process.stdout.write(`${Number(m[1])}.${Number(m[2])}`);
+            else process.stdout.write(String(v).replace(/\b\d+\b/g, (s) => String(Number(s))));
+          ')
+          FINAL="APRSWolf_${DISPLAY_VERSION}_${LABEL}.dmg"
+          mkdir -p dist-macos
+          cp "$DMG" "dist-macos/$FINAL"
+          echo "Origin: $DMG"
+          echo "Final:  dist-macos/$FINAL"
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: APRSWolf-macos-${{ matrix.label }}
+          path: dist-macos/*.dmg
+          if-no-files-found: error
+
+  macos-universal:
+    name: macOS (universal)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: lts/*
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-apple-darwin,aarch64-apple-darwin
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      # Reuses the existing universal packaging script (clean rebuild of both
+      # arch bundles, lipo merge, DMG creation, display-version naming).
+      - name: Build universal DMG
+        run: npm run release:macos:universal
+
+      - name: Collect universal DMG
+        run: |
+          mkdir -p dist-macos
+          cp src-tauri/target/universal-apple-darwin/release/bundle/dmg/*.dmg dist-macos/
+          ls -1 dist-macos
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: APRSWolf-macos-universal
+          path: dist-macos/*.dmg
+          if-no-files-found: error
+
+  # ───────────────────────────────────────────────────────────
+  # Linux — .deb + .rpm + .AppImage for amd64 and arm64
+  # ───────────────────────────────────────────────────────────
+  linux:
+    name: Linux (${{ matrix.label }})
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: amd64
+            runner: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
+          - label: arm64
+            runner: ubuntu-22.04-arm
+            target: aarch64-unknown-linux-gnu
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: lts/*
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      # Tauri v2 Linux build dependencies. `rpm` provides rpmbuild for the
+      # .rpm bundle. Ubuntu 22.04 is used as the baseline for glibc compat.
+      - name: Install Linux system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            build-essential \
+            curl \
+            wget \
+            file \
+            libxdo-dev \
+            libssl-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            rpm
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Build bundles (${{ matrix.label }})
+        env:
+          TAURI_TARGET: ${{ matrix.target }}
+        run: npm run tauri build -- --bundles deb,rpm,appimage --target "$TAURI_TARGET"
+
+      - name: Collect bundles to display-version form
+        env:
+          TAURI_TARGET: ${{ matrix.target }}
+          LABEL: ${{ matrix.label }}
+        run: |
+          BUNDLE_DIR="src-tauri/target/$TAURI_TARGET/release/bundle"
+          DISPLAY_VERSION=$(node -e '
+            const p = require("./package.json");
+            const v = p.displayVersion || p.version;
+            const m = String(v).match(/^(\d+)\.(\d+)\.(\d+)$/);
+            if (m) process.stdout.write(`${Number(m[1])}.${Number(m[2])}`);
+            else process.stdout.write(String(v).replace(/\b\d+\b/g, (s) => String(Number(s))));
+          ')
+          mkdir -p dist-linux
+          DEB=$(ls -t "$BUNDLE_DIR/deb"/*.deb 2>/dev/null | head -1 || true)
+          RPM=$(ls -t "$BUNDLE_DIR/rpm"/*.rpm 2>/dev/null | head -1 || true)
+          APPIMAGE=$(ls -t "$BUNDLE_DIR/appimage"/*.AppImage 2>/dev/null | head -1 || true)
+          [[ -n "$DEB" ]] && cp "$DEB" "dist-linux/APRSWolf_${DISPLAY_VERSION}_${LABEL}.deb"
+          [[ -n "$RPM" ]] && cp "$RPM" "dist-linux/APRSWolf-${DISPLAY_VERSION}-1.${LABEL}.rpm"
+          [[ -n "$APPIMAGE" ]] && cp "$APPIMAGE" "dist-linux/APRSWolf_${DISPLAY_VERSION}_${LABEL}.AppImage"
+          ls -1 dist-linux
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: APRSWolf-linux-${{ matrix.label }}
+          path: dist-linux/*
+          if-no-files-found: error
+
+  # ───────────────────────────────────────────────────────────
+  # Windows — MSI + NSIS .exe (x64)
+  # ───────────────────────────────────────────────────────────
+  windows:
+    name: Windows (x64)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: lts/*
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Build installers (MSI + NSIS)
+        run: npm run tauri build -- --bundles msi,nsis --target x86_64-pc-windows-msvc
+
+      - name: Collect installers to display-version form
+        shell: bash
+        run: |
+          BUNDLE_DIR="src-tauri/target/x86_64-pc-windows-msvc/release/bundle"
+          DISPLAY_VERSION=$(node -e '
+            const p = require("./package.json");
+            const v = p.displayVersion || p.version;
+            const m = String(v).match(/^(\d+)\.(\d+)\.(\d+)$/);
+            if (m) process.stdout.write(`${Number(m[1])}.${Number(m[2])}`);
+            else process.stdout.write(String(v).replace(/\b\d+\b/g, (s) => String(Number(s))));
+          ')
+          mkdir -p dist-windows
+          MSI=$(ls -t "$BUNDLE_DIR/msi"/*.msi 2>/dev/null | head -1 || true)
+          EXE=$(ls -t "$BUNDLE_DIR/nsis"/*.exe 2>/dev/null | head -1 || true)
+          [[ -n "$MSI" ]] && cp "$MSI" "dist-windows/APRSWolf_${DISPLAY_VERSION}_x64.msi"
+          [[ -n "$EXE" ]] && cp "$EXE" "dist-windows/APRSWolf_${DISPLAY_VERSION}_x64-setup.exe"
+          ls -1 dist-windows
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: APRSWolf-windows-x64
+          path: dist-windows/*
+          if-no-files-found: error
+
+  # ───────────────────────────────────────────────────────────
+  # Release — collect all artifacts and publish one GitHub Release
+  # ───────────────────────────────────────────────────────────
+  release:
+    name: Publish GitHub Release
+    needs: [macos, macos-universal, linux, windows]
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/')
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v7
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: List collected artifacts
+        run: ls -R artifacts
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v3
+        with:
+          files: artifacts/*
+          generate_release_notes: true
+          draft: false

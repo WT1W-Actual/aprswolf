@@ -1,38 +1,50 @@
 #!/usr/bin/env bash
 # ─────────────────────────────────────────────────────────────
-# APRSWolf — Linux (.deb) build for x86_64
+# APRSWolf — Linux build (.deb + .rpm + .AppImage)
 # ─────────────────────────────────────────────────────────────
-# Run this on an amd64 Linux machine/VM (Ubuntu/Debian-based).
+# Run this on a Linux machine/VM (Ubuntu/Debian-based recommended).
 #
 # Prereqs handled automatically:
 #   - Tauri v2 Linux system deps (GTK3, webkit2gtk, etc.)
-#   - Rust `x86_64-unknown-linux-gnu` target
+#   - rpmbuild (for the .rpm bundle)
+#   - Rust target (x86_64 or aarch64)
 #   - Node dependencies
 #
 # Usage:
-#   ./scripts/build-linux-deb.sh              build + verify + .deb
-#   ./scripts/build-linux-deb.sh --no-tests   skip frontend/backend tests (faster)
-#   ./scripts/build-linux-deb.sh --help       this message
+#   ./scripts/build-linux.sh              build + verify + all bundles
+#   ./scripts/build-linux.sh --no-tests   skip frontend/backend tests (faster)
+#   ./scripts/build-linux.sh --bundles deb,rpm,appimage
+#   ./scripts/build-linux.sh --help       this message
+#
+# Environment:
+#   RUST_LINUX_TARGET   override the Rust target
+#                       (default: x86_64-unknown-linux-gnu)
 # ─────────────────────────────────────────────────────────────
 
 set -euo pipefail
 
 # Allow overriding the Rust target being built.
 TARGET="${RUST_LINUX_TARGET:-x86_64-unknown-linux-gnu}"
+BUNDLES="deb,rpm,appimage"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 cd "$PROJECT_ROOT"
 
-echo "═══ APRSWolf Linux .deb Build ═══  (target: ${TARGET})"
+echo "═══ APRSWolf Linux Build ═══  (target: ${TARGET})"
 echo ""
 
 RUN_TESTS=1
 for arg in "$@"; do
   case "$arg" in
     --no-tests) RUN_TESTS=0 ;;
+    --bundles=*) BUNDLES="${arg#--bundles=}" ;;
+    --bundles)
+      echo "Use --bundles=deb,rpm,appimage (with '=')." >&2
+      exit 1
+      ;;
     --help|-h)
-      sed -n '2,16p' "$BASH_SOURCE" | sed 's/^# \{0,1\}//'
+      sed -n '2,22p' "$BASH_SOURCE" | sed 's/^# \{0,1\}//'
       exit 0
       ;;
     *) echo "Unknown option: $arg" >&2; exit 1 ;;
@@ -62,10 +74,12 @@ if command -v apt-get >/dev/null 2>&1; then
     libxdo-dev \
     libssl-dev \
     libayatana-appindicator3-dev \
-    librsvg2-dev
+    librsvg2-dev \
+    rpm
 else
   echo "⚠  apt-get not found. Please install the Tauri Linux prerequisites for your distro:"
   echo "   https://v2.tauri.app/start/prerequisites/"
+  echo "   (The .rpm bundle additionally requires 'rpmbuild' from the 'rpm' package.)"
 fi
 echo ""
 
@@ -96,21 +110,17 @@ if [[ "$RUN_TESTS" == "1" ]]; then
   echo ""
 fi
 
-# ── 5. Build the .deb ──
-echo "── Building Tauri bundle (.deb) for ${TARGET} ──"
-npm run tauri build -- --bundles deb --target "$TARGET"
+# ── 5. Build the bundles ──
+echo "── Building Tauri bundles (${BUNDLES}) for ${TARGET} ──"
+npm run tauri build -- --bundles "$BUNDLES" --target "$TARGET"
 echo ""
 
-# ── 6. Locate + rename the produced .deb to display-version form ──
-TARGET_DIR="src-tauri/target/${TARGET}/release/bundle/deb"
-echo "── Locating built .deb ──"
-DEB=$(ls -t "$TARGET_DIR"/*.deb 2>/dev/null | head -1 || true)
-if [[ -z "$DEB" ]]; then
-  echo "⚠  No .deb found in $TARGET_DIR — check the build output above." >&2
-  exit 1
-fi
+# ── 6. Locate + rename produced bundles to display-version form ──
+BUNDLE_DIR="src-tauri/target/${TARGET}/release/bundle"
+OUT_DIR="$PROJECT_ROOT/dist-linux"
+mkdir -p "$OUT_DIR"
 
-# Tauri names it like APRSWolf_1.0.0_amd64.deb . Mirror the macOS
+# Tauri names packages like APRSWolf_1.0.0_amd64.deb . Mirror the macOS
 # display-version naming: 1.0.0 -> 1.0 (keeps the .0), so the .deb is
 # APRSWolf_1.0_amd64.deb.
 DISPLAY_PKG_VERSION=$(node -e '
@@ -123,21 +133,37 @@ else process.stdout.write(String(v).replace(/\b\d+\b/g, (s) => String(Number(s))
 
 ARCH="${TARGET%%-*}"
 case "$ARCH" in
-  x86_64) DEB_ARCH="amd64" ;;
-  aarch64) DEB_ARCH="arm64" ;;
+  x86_64) PKG_ARCH="amd64" ;;
+  aarch64) PKG_ARCH="arm64" ;;
 esac
 
-FINAL_NAME="APRSWolf_${DISPLAY_PKG_VERSION}_${DEB_ARCH}.deb"
-OUT_DIR="$PROJECT_ROOT/dist-linux"
-mkdir -p "$OUT_DIR"
+copy_bundle() {
+  local src="$1" final_name="$2"
+  if [[ -z "$src" || ! -f "$src" ]]; then
+    echo "⚠  Expected bundle not found for ${final_name}" >&2
+    return 1
+  fi
+  local final_path="$OUT_DIR/$final_name"
+  rm -f "$final_path"
+  cp "$src" "$final_path"
+  echo "  → ${final_path} ($(du -h "$final_path" | cut -f1))"
+}
 
-FINAL_PATH="$OUT_DIR/$FINAL_NAME"
-rm -f "$FINAL_PATH"
-cp "$DEB" "$FINAL_PATH"
+echo "── Collecting bundles into dist-linux/ ──"
 
-SIZE=$(du -h "$FINAL_PATH" | cut -f1)
+# .deb
+DEB=$(ls -t "$BUNDLE_DIR/deb"/*.deb 2>/dev/null | head -1 || true)
+copy_bundle "$DEB" "APRSWolf_${DISPLAY_PKG_VERSION}_${PKG_ARCH}.deb" || true
+
+# .rpm
+RPM=$(ls -t "$BUNDLE_DIR/rpm"/*.rpm 2>/dev/null | head -1 || true)
+copy_bundle "$RPM" "APRSWolf-${DISPLAY_PKG_VERSION}-1.${PKG_ARCH}.rpm" || true
+
+# .AppImage
+APPIMAGE=$(ls -t "$BUNDLE_DIR/appimage"/*.AppImage 2>/dev/null | head -1 || true)
+copy_bundle "$APPIMAGE" "APRSWolf_${DISPLAY_PKG_VERSION}_${PKG_ARCH}.AppImage" || true
+
 echo ""
-echo "═══ Done: ${FINAL_PATH} (${SIZE}) ═══"
-echo ""
-echo "Bundle output is also at:"
-echo "  $TARGET_DIR/$(basename "$DEB")"
+echo "═══ Done ═══"
+echo "Artifacts in: $OUT_DIR"
+ls -1 "$OUT_DIR" 2>/dev/null || true

@@ -13,7 +13,7 @@
 5. [Ponytail Audit — What Was Fixed & Why](#ponytail-audit--what-was-fixed--why)
 6. [Common Pitfalls (Don't Repeat These)](#common-pitfalls-dont-repeat-these)
 7. [Mac App Store Gotchas](#mac-app-store-gotchas)
-8. [Future Cross-Platform Notes](#future-cross-platform-notes)
+8. [Cross-Platform Notes](#cross-platform-notes)
 9. [Build & Release](#build--release)
 
 ---
@@ -329,21 +329,26 @@ This audit was run on 2026-06-17 by the Ponytail plugin. The findings below are 
 - **Sandbox entitlements.** The Mac App Store requires sandboxing. APRSWolf's TNC access (network connections to Dire Wolf) and file I/O (settings persistence) will need explicit entitlements. Map these carefully — the networking entitlements for TNC TCP access must allow arbitrary TCP connections to localhost devices.
 - **Tauri v2 + Mac App Store** has known quirks. Test the sandboxed build thoroughly before submission. Key areas: file access (settings), network access (TNC, APRS-IS), and webview behavior under sandbox.
 
-## Future Cross-Platform Notes
+## Cross-Platform Notes
+
+APRSWolf now ships for macOS, Linux, and Windows. The notes below capture the
+platform-specific behavior to keep in mind.
 
 ### Windows
 
-- **PTY differences:** No UNIX pseudoterminals. KISS TCP connection logic should be portable, but test TCPServer bind behavior on Windows.
+- **PTY differences:** No UNIX pseudoterminals. KISS TCP connection logic is portable; TCPServer bind behavior is verified on Windows.
 - **Tauri v2 Windows support** is mature. The main effort is UI layout testing — React components are portable, but WKWebView vs WebView2 render differently.
-- **Directory paths:** Rust's `dirs` crate handles this, but verify settings file locations on Windows.
-- **Package with WiX or MSI** — Tauri supports both. MSI is more modern.
+- **Directory paths:** Rust's `dirs` crate handles this; settings file locations are verified on Windows.
+- **Packaging:** MSI (WiX) + NSIS `.exe`, built by the `release` workflow on `windows-latest`.
+- **System alert sound:** `runtime.rs` plays the macOS `osascript beep` only on macOS; on Windows/Linux the sound call is a no-op.
 
 ### Linux
 
 - **No built-in webview on most distros.** Tauri uses WebKitGTK. Users may need to install it: `sudo apt install libwebkit2gtk-4.1-dev`.
-- **No App Store distribution.** Package as AppImage, Flatpak, or Snap.
+- **No App Store distribution.** Packages are `.deb`, `.rpm`, and `.AppImage`.
 - **Dire Wolf is native on Linux** — TNC mode works best here.
 - **Test on both X11 and Wayland.** Tauri v2 handles Wayland, but window positioning and sizes can differ.
+- **Build baseline:** Ubuntu 22.04 is used in CI to keep the glibc floor low.
 
 ### General Cross-Platform
 
@@ -356,15 +361,24 @@ This audit was run on 2026-06-17 by the Ponytail plugin. The findings below are 
 See the [project README](../README.md) for quick-start commands. Full release process:
 
 ```bash
-# 1. Bump version in package.json and src-tauri/Cargo.toml
+# 1. Bump version in package.json (version + displayVersion),
+#    src-tauri/Cargo.toml, and src-tauri/tauri.conf.json
 # 2. Write release notes (copy RELEASE-NOTES-TEMPLATE.md → docs/releases/X.Y.Z.md)
-# 3. Build universal macOS DMG
-npm run release:macos:universal
-# 4. Sign the .app bundle (developer cert required)
-# 5. Notarize with Apple
-# 6. DMG published at:
-#    src-tauri/target/universal-apple-darwin/release/bundle/dmg/APRSWolf_X.Y.Z_universal.dmg
+# 3. Commit, then push a version tag:
+git tag v1.0.0 && git push origin v1.0.0
+# 4. The `release` GitHub Actions workflow builds all platforms and
+#    attaches every artifact to a single GitHub Release.
 ```
+
+Local builds per platform:
+
+```bash
+npm run release:macos:universal   # macOS universal DMG
+npm run release:linux             # Linux .deb + .rpm + .AppImage (on Linux)
+npm run release:windows           # Windows MSI + NSIS .exe (on Windows)
+```
+
+macOS artifacts are unsigned for now; sign/notarize before public distribution.
 
 ## Version History
 
