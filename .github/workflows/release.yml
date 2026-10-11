@@ -150,7 +150,9 @@ jobs:
           targets: ${{ matrix.target }}
 
       # Tauri v2 Linux build dependencies. `rpm` provides rpmbuild for the
-      # .rpm bundle. Ubuntu 22.04 is used as the baseline for glibc compat.
+      # .rpm bundle. `xdg-utils` provides /usr/bin/xdg-open, which the
+      # AppImage bundler requires (missing on the arm64 runner image).
+      # Ubuntu 22.04 is used as the baseline for glibc compat.
       - name: Install Linux system dependencies
         run: |
           sudo apt-get update
@@ -164,7 +166,8 @@ jobs:
             libssl-dev \
             libayatana-appindicator3-dev \
             librsvg2-dev \
-            rpm
+            rpm \
+            xdg-utils
 
       - name: Install frontend dependencies
         run: npm ci

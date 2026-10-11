@@ -75,11 +75,13 @@ if command -v apt-get >/dev/null 2>&1; then
     libssl-dev \
     libayatana-appindicator3-dev \
     librsvg2-dev \
-    rpm
+    rpm \
+    xdg-utils
 else
   echo "⚠  apt-get not found. Please install the Tauri Linux prerequisites for your distro:"
   echo "   https://v2.tauri.app/start/prerequisites/"
   echo "   (The .rpm bundle additionally requires 'rpmbuild' from the 'rpm' package.)"
+  echo "   (The .AppImage bundle additionally requires 'xdg-open' from the 'xdg-utils' package.)"
 fi
 echo ""
 
