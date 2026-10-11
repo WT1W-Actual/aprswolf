@@ -13,6 +13,133 @@ Tauri + React desktop app for APRS messaging over KISS/AGW TCP (Dire Wolf compat
 - Current release notes: see [docs/releases/1.0.md](docs/releases/1.0.md)
 - Developers: use the build and test notes below
 
+## Setup
+
+Do this once per machine, before installing or building anything.
+
+### What you need
+
+- **Node.js** (LTS)
+- **Rust**, installed through rustup
+- **Tauri's system libraries** for your OS, listed below
+- **Dire Wolf** (optional, for TNC mode). APRSWolf does not include a software TNC. You can use Dire Wolf as a KISS TCP TNC. Dire Wolf must be configured with a KISS TCP port (default 8001) that APRSWolf can connect to. See [Dire Wolf documentation](https://github.com/wb2osz/direwolf) for setup details.
+- **APRS-IS Server** (optional, for APRS-IS mode). You can connect to any APRS-IS server (default `rotate.aprs2.net:14580`) for internet-based APRS messaging.
+- **Valid APRS Callsign**, required for both TNC and APRS-IS modes.
+- **APRS-IS Passcode**, derived automatically from your callsign for APRS-IS connections. Use `-1` for receive-only mode.
+
+The upstream Tauri guide covers other distros and edge cases:
+[Tauri prerequisites](https://v2.tauri.app/start/prerequisites/).
+
+### macOS
+
+Install the Xcode Command Line Tools (`xcode-select --install`) and
+Node.js LTS, then:
+
+```bash
+brew install rustup                       # Rust's toolchain manager
+```
+
+Homebrew installs rustup "keg-only", which means it stays off the PATH
+until you add it. Run `echo $SHELL` to see which shell you use, then
+add the line for that shell:
+
+```bash
+# zsh, the macOS default since Catalina
+echo 'export PATH="$(brew --prefix rustup)/bin:$HOME/.cargo/bin:$PATH"' >> ~/.zshrc
+
+# bash (Terminal starts bash as a login shell, which reads ~/.bash_profile)
+echo 'export PATH="$(brew --prefix rustup)/bin:$HOME/.cargo/bin:$PATH"' >> ~/.bash_profile
+
+# fish (saved once, applies to every new fish session)
+fish -c 'fish_add_path (brew --prefix rustup)/bin ~/.cargo/bin'
+```
+
+Open a new terminal window so the change applies, then:
+
+```bash
+rustup default stable                     # install the stable toolchain
+rustup target add x86_64-apple-darwin aarch64-apple-darwin   # Intel and Apple Silicon targets
+which cargo rustc                         # both should be under .../rustup/bin
+```
+
+If you'd rather not use Homebrew, the installer from
+[rustup.rs](https://rustup.rs) works too and adds Rust to the PATH for
+bash, zsh and fish itself.
+
+Don't also run `brew install rust`. That formula is a separate Rust with
+its own `cargo` and `rustc`, built for your Mac's own chip only. If it
+comes first on the PATH, the build uses it instead of rustup, the
+targets added above are never seen, and the universal build fails with
+`can't find crate for std` for `x86_64-apple-darwin`. If you already
+installed it, `brew uninstall rust` fixes this.
+
+The `release:macos` and `release:macos:universal` scripts check for both
+targets and stop with a "Missing Rust targets" message if one is
+missing.
+
+### Linux (Debian, Ubuntu, Raspberry Pi OS)
+
+```bash
+sudo apt-get update
+sudo apt-get install -y \
+  libwebkit2gtk-4.1-dev build-essential curl wget file libxdo-dev \
+  libssl-dev libayatana-appindicator3-dev librsvg2-dev rpm xdg-utils
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+. "$HOME/.cargo/env"                      # this shell only (fish: source ~/.cargo/env.fish)
+rustup default stable
+```
+
+The rustup installer adds Rust to the PATH for future bash, zsh and
+fish sessions. The `.cargo/env` line covers the shell you ran it in.
+
+These are the packages the release workflow installs. `rpm` is only
+needed for the `.rpm` bundle and `xdg-utils` only for the `.AppImage`.
+Install Node.js LTS from [nodejs.org](https://nodejs.org) or NodeSource,
+since distro packages are often older than LTS. On Fedora and other
+non-apt distros, use the package list from the Tauri guide linked above.
+`npm run release:linux` installs the apt packages and rustup itself if
+they're missing.
+
+### Windows
+
+1. Install [Microsoft C++ Build Tools](https://visualstudio.microsoft.com/visual-cpp-build-tools/)
+   and select the "Desktop development with C++" workload.
+2. WebView2 ships with Windows 10 and 11. On an older system, install the
+   Evergreen runtime from [Microsoft](https://developer.microsoft.com/microsoft-edge/webview2/).
+3. Install Rust with `rustup-init.exe` from [rustup.rs](https://rustup.rs),
+   then in a new PowerShell window:
+
+   ```powershell
+   rustup default stable-msvc
+   rustup target add x86_64-pc-windows-msvc
+   ```
+
+4. Install Node.js LTS from [nodejs.org](https://nodejs.org).
+
+Build from PowerShell with `npm run release:windows`.
+
+### Optional on any OS: a `tauri` command
+
+`npm run tauri ...` uses the Tauri CLI that `npm install` puts in
+`node_modules`, so nothing else is needed. If you want to call Tauri
+directly, `cargo install tauri-cli` adds `cargo tauri`. It creates only
+`cargo-tauri`, not a bare `tauri`, so add a link if you want one:
+
+```bash
+ln -s ~/.cargo/bin/cargo-tauri ~/.cargo/bin/tauri   # macOS and Linux
+```
+
+### Install
+
+```bash
+npm install
+```
+
+Run this in the repo folder before any `npm run` command. It installs
+TypeScript, Vite and the Tauri CLI that the build scripts call. If a
+build stops with `tsc: command not found`, this step was skipped, and
+running it fixes the error without adding anything to `package.json`.
+
 ## Releases
 
 APRSWolf ships for macOS, Linux, and Windows. The recommended way to publish a
@@ -101,7 +228,7 @@ In plain terms:
 - APRSWolf logo is centered at the top of the interface.
 - Station settings (callsign, digi path), TNC, and APRS-IS controls are combined in a
   single compact row separated by vertical dividers.
-- TNC and APRS-IS are mutually exclusive — connecting one disables the other.
+- TNC and APRS-IS are mutually exclusive - connecting one disables the other.
 - Input fields are fixed-width to avoid wasted space (callsigns, ports, hosts).
 - Sent and Received message panes resize dynamically to fill available window space.
 - Message and Traffic Log panels stretch both horizontally and vertically with the window.
@@ -109,22 +236,6 @@ In plain terms:
 - Basic multipart stitching is applied for near-sequential fragments from the same sender.
 - Traffic Log can be shown/hidden via a centered toggle button.
 - Help opens in its own macOS-style window with sidebar navigation and search.
-
-## Prerequisites
-
-- **Dire Wolf** (optional, for TNC mode) — APRSWolf does not include a software TNC. You can use Dire Wolf as a KISS TCP TNC. Dire Wolf must be configured with a KISS TCP port (default 8001) that APRSWolf can connect to. See [Dire Wolf documentation](https://github.com/wb2osz/direwolf) for setup details.
-- **APRS-IS Server** (optional, for APRS-IS mode) — You can connect to any APRS-IS server (default `rotate.aprs2.net:14580`) for internet-based APRS messaging.
-- **Valid APRS Callsign** — Required for both TNC and APRS-IS modes.
-- **APRS-IS Passcode** — Automatically derived from your callsign for APRS-IS connections. Use `-1` for receive-only mode.
-- Node.js (LTS recommended)
-- Rust toolchain (`cargo` and `rustc`)
-- Tauri platform requirements for macOS
-
-## Install
-
-```bash
-npm install
-```
 
 ## Run
 
@@ -140,11 +251,15 @@ Equivalent direct command:
 npm run tauri dev
 ```
 
-If cargo is missing in a fresh shell:
+If cargo is missing in a fresh shell, load it for that session:
 
 ```bash
-source ~/.cargo/env
+source ~/.cargo/env          # bash and zsh
+source ~/.cargo/env.fish     # fish
 ```
+
+On a Mac that installed rustup through Homebrew, recheck the PATH line
+for your shell under Setup instead.
 
 ## Scripts
 
