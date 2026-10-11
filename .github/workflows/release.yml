@@ -262,6 +262,8 @@ jobs:
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/')
     steps:
+      - uses: actions/checkout@v7
+
       - name: Download all artifacts
         uses: actions/download-artifact@v7
         with:
@@ -271,9 +273,26 @@ jobs:
       - name: List collected artifacts
         run: ls -R artifacts
 
+      # Curated release notes live at docs/releases/<version>.md, where
+      # <version> is the tag without its leading "v" (e.g. tag v1.0.1 ->
+      # docs/releases/1.0.1.md). If the file is missing we fall back to
+      # GitHub's auto-generated notes so a release is never blocked.
+      - name: Resolve release notes
+        id: notes
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          NOTES="docs/releases/${VERSION}.md"
+          if [ -f "$NOTES" ]; then
+            echo "Using curated notes: $NOTES"
+            echo "body_path=$NOTES" >> "$GITHUB_OUTPUT"
+          else
+            echo "No curated notes at $NOTES; falling back to generated notes."
+          fi
+
       - name: Publish release
         uses: softprops/action-gh-release@v3
         with:
           files: artifacts/*
-          generate_release_notes: true
+          body_path: ${{ steps.notes.outputs.body_path }}
+          generate_release_notes: ${{ steps.notes.outputs.body_path == '' }}
           draft: false
