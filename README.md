@@ -23,6 +23,46 @@ remote control serves a browser page you can open from your phone on
 the local network once you set a remote token. It runs on macOS, Linux
 and Windows.
 
+## Download
+
+Grab the latest version from the
+[Releases page](https://github.com/WT1W-Actual/aprswolf/releases/latest).
+No build tools needed.
+
+| Your computer | Download this |
+|---------------|---------------|
+| Mac, any (Intel or Apple Silicon) | `APRSWolf_1.0_universal.dmg` |
+| Mac, Intel only | `APRSWolf_1.0_x64.dmg` |
+| Mac, Apple Silicon only | `APRSWolf_1.0_arm64.dmg` |
+| Windows | `APRSWolf_1.0_x64-setup.exe` (or the `.msi`) |
+| Linux, Debian or Ubuntu | `APRSWolf_1.0_amd64.deb` (`arm64` for a 64-bit Raspberry Pi) |
+| Linux, Fedora or openSUSE | `APRSWolf-1.0-1.amd64.rpm` (`arm64` for ARM) |
+| Linux, any distro | `APRSWolf_1.0_amd64.AppImage` (`arm64` for ARM) |
+
+The macOS and Windows builds aren't code-signed yet, so the first launch
+needs one extra click:
+
+- **macOS:** open the `.dmg` and drag APRSWolf to Applications. If macOS
+  says it can't verify the app, open System Settings → Privacy &
+  Security, scroll down, and click **Open Anyway**.
+- **Windows:** if SmartScreen says it protected your PC, click
+  **More info**, then **Run anyway**.
+- **Linux AppImage:** make it executable first
+  (`chmod +x APRSWolf_1.0_amd64.AppImage`), then run it.
+
+### Getting started
+
+You'll need an amateur radio callsign. Then pick one way onto the
+network:
+
+- **No radio needed:** choose APRS-IS, enter your callsign, and connect.
+  APRSWolf fills in the passcode from your callsign.
+- **On the air:** run [Dire Wolf](https://github.com/wb2osz/direwolf) or
+  Graywolf with your radio, then point APRSWolf at its host and KISS port
+  (8001 by default).
+
+The [End User Guide](docs/END-USER-GUIDE.md) walks through the rest.
+
 ## Documentation
 
 - Documentation index: see [docs/README.md](docs/README.md)
@@ -34,9 +74,55 @@ and Windows.
 - Current release notes: see [docs/releases/1.0.md](docs/releases/1.0.md)
 - Developers: use the build and test notes below
 
-## Setup
+## What It Does
 
-Do this once per machine, before installing or building anything.
+- Connects to a Dire Wolf TNC via KISS TCP with separate TX/RX status indicators.
+- Connects to APRS-IS for internet-based APRS messaging (mutually exclusive with TNC).
+- Sends APRS message frames with ACK numbering.
+- Persists outbound messages to a durable queue.
+- Retries queued and failed messages with backoff until acked, failed, or expired.
+- Shows compact Sent and Received panes that resize dynamically with the window.
+- Supports click-to-reply from Received messages.
+- Includes a dedicated Help window with guided setup and troubleshooting topics.
+- Exposes native macOS `Preferences...` and `Help > APRSWolf Help` menu items.
+- Supports a Received filter (To Me Only).
+- Supports optional Traffic Log panel (off by default).
+- Auto-derives APRS-IS passcode from the source callsign.
+
+## APRS And AX.25 Behavior
+
+Outbound message behavior is APRS-compliant:
+
+- AX.25 destination is always APRS.
+- UI "Message To" field is the APRS addressee (callsign being messaged), not the AX.25 destination.
+- Info payload format is APRS message format with optional message number suffix.
+- Message numbers are appended as two-digit values for ACK tracking.
+
+In plain terms:
+
+- Source field = your station callsign/SSID.
+- Message To field = station you want to message (example: WXYO).
+- Digipeater Path field = WIDE path list.
+
+## UI Notes
+
+- APRSWolf logo is centered at the top of the interface.
+- Station settings (callsign, digi path), TNC, and APRS-IS controls are combined in a
+  single compact row separated by vertical dividers.
+- TNC and APRS-IS are mutually exclusive - connecting one disables the other.
+- Input fields are fixed-width to avoid wasted space (callsigns, ports, hosts).
+- Sent and Received message panes resize dynamically to fill available window space.
+- Message and Traffic Log panels stretch both horizontally and vertically with the window.
+- Received text wraps instead of forcing horizontal growth.
+- Basic multipart stitching is applied for near-sequential fragments from the same sender.
+- Traffic Log can be shown/hidden via a centered toggle button.
+- Help opens in its own macOS-style window with sidebar navigation and search.
+
+## Building from source
+
+Only needed if you want to build APRSWolf yourself; to just run it, use
+[Download](#download) above. Do this setup once per machine, before
+installing or building anything.
 
 ### What you need
 
@@ -161,103 +247,6 @@ TypeScript, Vite and the Tauri CLI that the build scripts call. If a
 build stops with `tsc: command not found`, this step was skipped, and
 running it fixes the error without adding anything to `package.json`.
 
-## Releases
-
-APRSWolf ships for macOS, Linux, and Windows. The recommended way to publish a
-release is to push a version tag (e.g. `v1.0.0`); the `release` GitHub Actions
-workflow builds every platform and attaches all artifacts to a single GitHub
-Release.
-
-### Download artifacts
-
-| Platform | Architecture | Artifact |
-|----------|--------------|----------|
-| macOS | Universal (Intel + Apple Silicon) | `APRSWolf_1.0_universal.dmg` |
-| macOS | Intel | `APRSWolf_1.0_x64.dmg` |
-| macOS | Apple Silicon | `APRSWolf_1.0_aarch64.dmg` |
-| Linux | amd64 | `APRSWolf_1.0_amd64.deb`, `APRSWolf-1.0-1.amd64.rpm`, `APRSWolf_1.0_amd64.AppImage` |
-| Linux | arm64 | `APRSWolf_1.0_arm64.deb`, `APRSWolf-1.0-1.arm64.rpm`, `APRSWolf_1.0_arm64.AppImage` |
-| Windows | x64 | `APRSWolf_1.0_x64.msi`, `APRSWolf_1.0_x64-setup.exe` |
-
-### Publishing a release
-
-1. Bump the version in `package.json` (`version` + `displayVersion`),
-   `src-tauri/Cargo.toml`, and `src-tauri/tauri.conf.json`.
-2. Copy [docs/RELEASE-NOTES-TEMPLATE.md](docs/RELEASE-NOTES-TEMPLATE.md) to
-   `docs/releases/X.Y.Z.md` and fill it in.
-3. Add the new version to [docs/releases/README.md](docs/releases/README.md).
-4. Commit, then push a tag: `git tag v1.0.0 && git push origin v1.0.0`.
-5. The `release` workflow builds all platforms and publishes the GitHub Release.
-
-### Building locally
-
-macOS (universal DMG):
-
-```bash
-npm run release:macos:universal
-```
-
-Linux (`.deb` + `.rpm` + `.AppImage`, run on Linux):
-
-```bash
-npm run release:linux            # or release:linux:no-tests
-```
-
-Windows (MSI + NSIS `.exe`, run on Windows):
-
-```powershell
-npm run release:windows          # or release:windows:no-tests
-```
-
-Signing and notarization note:
-
-- If you distribute the universal `.app`, sign it after the `lipo` merge step used by the universal packaging script.
-- macOS and Windows artifacts are currently unsigned; add signing secrets to the `release` workflow when ready.
-
-## What It Does
-
-- Connects to a Dire Wolf TNC via KISS TCP with separate TX/RX status indicators.
-- Connects to APRS-IS for internet-based APRS messaging (mutually exclusive with TNC).
-- Sends APRS message frames with ACK numbering.
-- Persists outbound messages to a durable queue.
-- Retries queued and failed messages with backoff until acked, failed, or expired.
-- Shows compact Sent and Received panes that resize dynamically with the window.
-- Supports click-to-reply from Received messages.
-- Includes a dedicated Help window with guided setup and troubleshooting topics.
-- Exposes native macOS `Preferences...` and `Help > APRSWolf Help` menu items.
-- Supports a Received filter (To Me Only).
-- Supports optional Traffic Log panel (off by default).
-- Auto-derives APRS-IS passcode from the source callsign.
-
-## APRS And AX.25 Behavior
-
-Outbound message behavior is APRS-compliant:
-
-- AX.25 destination is always APRS.
-- UI "Message To" field is the APRS addressee (callsign being messaged), not the AX.25 destination.
-- Info payload format is APRS message format with optional message number suffix.
-- Message numbers are appended as two-digit values for ACK tracking.
-
-In plain terms:
-
-- Source field = your station callsign/SSID.
-- Message To field = station you want to message (example: WXYO).
-- Digipeater Path field = WIDE path list.
-
-## UI Notes
-
-- APRSWolf logo is centered at the top of the interface.
-- Station settings (callsign, digi path), TNC, and APRS-IS controls are combined in a
-  single compact row separated by vertical dividers.
-- TNC and APRS-IS are mutually exclusive - connecting one disables the other.
-- Input fields are fixed-width to avoid wasted space (callsigns, ports, hosts).
-- Sent and Received message panes resize dynamically to fill available window space.
-- Message and Traffic Log panels stretch both horizontally and vertically with the window.
-- Received text wraps instead of forcing horizontal growth.
-- Basic multipart stitching is applied for near-sequential fragments from the same sender.
-- Traffic Log can be shown/hidden via a centered toggle button.
-- Help opens in its own macOS-style window with sidebar navigation and search.
-
 ## Run
 
 Recommended:
@@ -331,3 +320,45 @@ cargo check
   Ensure Dire Wolf is running on the target host and that your network allows TCP traffic to
   the configured AGW/KISS port. On the Dire Wolf host, check `AGWPORT` and `KISSPORT` settings
   in `direwolf.conf`.
+
+## For maintainers
+
+APRSWolf ships for macOS, Linux, and Windows. The recommended way to publish a
+release is to push a version tag (e.g. `v1.0.0`); the `release` GitHub Actions
+workflow builds every platform and attaches all artifacts to a single GitHub
+Release.
+
+### Publishing a release
+
+1. Bump the version in `package.json` (`version` + `displayVersion`),
+   `src-tauri/Cargo.toml`, and `src-tauri/tauri.conf.json`.
+2. Copy [docs/RELEASE-NOTES-TEMPLATE.md](docs/RELEASE-NOTES-TEMPLATE.md) to
+   `docs/releases/X.Y.Z.md` and fill it in.
+3. Add the new version to [docs/releases/README.md](docs/releases/README.md).
+4. Commit, then push a tag: `git tag v1.0.0 && git push origin v1.0.0`.
+5. The `release` workflow builds all platforms and publishes the GitHub Release.
+
+### Building release packages locally
+
+macOS (universal DMG):
+
+```bash
+npm run release:macos:universal
+```
+
+Linux (`.deb` + `.rpm` + `.AppImage`, run on Linux):
+
+```bash
+npm run release:linux            # or release:linux:no-tests
+```
+
+Windows (MSI + NSIS `.exe`, run on Windows):
+
+```powershell
+npm run release:windows          # or release:windows:no-tests
+```
+
+Signing and notarization note:
+
+- If you distribute the universal `.app`, sign it after the `lipo` merge step used by the universal packaging script.
+- macOS and Windows artifacts are currently unsigned; add signing secrets to the `release` workflow when ready.
