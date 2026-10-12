@@ -70,7 +70,7 @@ function App() {
   const isTauriRuntime = Boolean((globalThis as { isTauri?: boolean }).isTauri);
   const docsPreviewMode = new URLSearchParams(window.location.search).get("docs") === "1";
   const uiLocked = !isTauriRuntime && !docsPreviewMode;
-  const [appVersion, setAppVersion] = useState(`v${packageJson.displayVersion ?? formatDisplayVersion(packageJson.version)}`);
+  const [appVersion, setAppVersion] = useState(`v${packageJson.version}`);
 
   const [host, setHost] = useState("");
   const [port, setPort] = useState("");
@@ -115,20 +115,6 @@ function App() {
   const settingsLoaded = useRef(false);
   const skipNextSettingsSave = useRef(false);
   const activityTimerRef = useRef<number | null>(null);
-
-  function formatDisplayVersion(version: string): string {
-    if (/^\d+\.\d+\.0$/.test(version)) {
-      return version.replace(/\.0$/, "");
-    }
-
-    const prereleaseMatch = version.match(/^(\d+)\.(\d+)\.0-([0-9A-Za-z][0-9A-Za-z.]*)$/);
-    if (prereleaseMatch) {
-      const [, major, minor, prerelease] = prereleaseMatch;
-      return `${major}.${minor}${prerelease.replace(/\./g, "")}`;
-    }
-
-    return version;
-  }
 
   const applyWebServerStatus = useCallback((status: WebServerStatusPayload) => {
     setWebServerEnabled(status.enabled);
@@ -261,7 +247,7 @@ function App() {
         const { getVersion } = await import("@tauri-apps/api/app");
         const version = await getVersion();
         if (active && version) {
-          setAppVersion(`v${formatDisplayVersion(version)}`);
+          setAppVersion(`v${version}`);
         }
       } catch {
         // Keep the package version fallback in browser preview or test mode.

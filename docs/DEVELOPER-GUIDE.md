@@ -401,7 +401,7 @@ DMGs.
 
 | Version | Date | Key Changes |
 |---------|------|-------------|
-| 1.0.4 | 2026-10-12 | Release filenames use the full `major.minor.patch` version (`displayVersion` now only drives the in-app badge). |
+| 1.0.4 | 2026-10-12 | Release filenames use the full `major.minor.patch` version; the in-app badge shows the full version. |
 | 1.0.3 | 2026-10-12 | Fix "damaged" error on Apple Silicon: `tauri.conf.json` sets `bundle.macOS.signingIdentity` to `-` so the whole app is ad-hoc signed with sealed resources. |
 | 1.0.2 | 2026-10-12 | Preferences now provide working standard connection defaults; Open Remote UI launches the system browser. |
 | 1.0.1 | 2026-10-11 | Bug fixes for message delivery, malformed input, remote access, and duplicate Traffic Log lines. |
