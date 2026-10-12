@@ -260,14 +260,14 @@ Choose `File > Export Messages...` (Cmd+Shift+E on macOS, Ctrl+Shift+E on Window
 Left as it opens, the window exports your sent messages and received messages, queries, and bulletins, oldest first, hidden ones included. To narrow the file:
 
 - Choose `Sent and received`, `Received only`, or `Sent only`.
-- Check `Only messages new since the last new-only export` to pick up where your last such export stopped. The first one takes everything; one right after it is empty.
+- Check `Only messages new since the last new-only export` to pick up where your last such export stopped. The first one takes everything; one right after it is empty. Only a new-only export with no other filter counts as the last one, so messages a narrower export left out still come along next time.
 - Check `Limit to a date range` and set From and To. Both days are included.
 - Enter callsigns, separated by commas, to keep messages to or from them. `K6ABC` matches every SSID; `K6ABC-9` matches only that one.
 - Check `Include positions, weather, and other short-lived packets` to add them. APRSWolf warns first that those packets are removed after the retention period set in Preferences, so only the ones still stored are exported.
 
 ### Importing Messages
 
-Choose `File > Import Messages...` (Cmd+Shift+I on macOS, Ctrl+Shift+I on Windows and Linux) and pick a CSV export, from this computer or another, even one you edited in a spreadsheet. Imported messages show in the lists at their own time. Messages already in your history are skipped, so importing a file twice does no harm. A row you typed in yourself needs `direction` (sent or received), `from`, `body`, and `timestamp`; sent rows also need `to` and a `status` of acked, failed, or expired.
+Choose `File > Import Messages...` (Cmd+Shift+I on macOS, Ctrl+Shift+I on Windows and Linux) and pick a CSV export, from this computer or another, even one you edited in a spreadsheet. Imported messages show in the lists at their own time. Messages already in your history are skipped, so importing a file twice does no harm. A row you typed in yourself needs `direction` (sent or received), `from`, `body`, and `timestamp`; sent rows also need `to` and a `status` of acked, failed, or expired. A time without a zone is read as UTC, and a time in the future is refused.
 
 APRSWolf checks every row first. If one is wrong, nothing is imported, and the dialog names each bad row and what to fix. If the file holds positions, weather, or other short-lived packets older than your retention setting, you're asked before they're stored; `Cancel` leaves your history unchanged.
 
@@ -349,6 +349,23 @@ The Help window is the fastest way to check:
 - receiving and reply workflows
 - remote web control behavior
 - troubleshooting notes
+
+Escape closes the Help window, as it does Preferences and the About window.
+
+## About Window
+
+`APRSWolf > About APRSWolf` shows the version, what APRSWolf works with, and the credits. Its `GitHub`, `Release notes`, and `Help` links open the project page, the notes for your version, or the Help window, and close the About window. Escape closes it too.
+
+## Menu Shortcuts
+
+| Action | macOS | Windows and Linux |
+|---|---|---|
+| Preferences | Cmd+, | Ctrl+, |
+| APRSWolf Help | Cmd+Shift+/ | Ctrl+Shift+/ |
+| Export Messages | Cmd+Shift+E | Ctrl+Shift+E |
+| Import Messages | Cmd+Shift+I | Ctrl+Shift+I |
+
+Escape closes Preferences, Help, and About.
 
 ## Screenshots
 

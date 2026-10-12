@@ -67,8 +67,8 @@ This document mirrors the Help window available from inside APRSWolf.
 - Use `Pop Out` to open the Messages window: sent and received in one timeline, with its own search.
 - A packet heard twice, over RF and APRS-IS or through two digipeaters, is listed once.
 - Hover a message and click `×` to clear it, or use `Clear all` beside a pane title to clear what that pane shows. Hold a message for half a second to select several, then click `×` on any selected one. Leave `Delete from database` unchecked to hide them but keep them findable by search, where `↺` puts one back; check it to delete them.
-- `File > Export Messages...` saves sent and received messages, queries, and bulletins to a CSV file for a spreadsheet, hidden ones included. Its window can narrow the file to sent or received, new since the last new-only export, a date range, or some callsigns, and can add short-lived packets.
-- `File > Import Messages...` reads an export back in, even one edited by hand. Messages already in your history are skipped, and a file with any bad row is refused with the rows listed.
+- `File > Export Messages...` (Cmd+Shift+E; Ctrl+Shift+E on Windows and Linux) saves sent and received messages, queries, and bulletins to a CSV file for a spreadsheet, hidden ones included. Its window can narrow the file to sent or received, new since the last new-only export, a date range, or some callsigns, and can add short-lived packets.
+- `File > Import Messages...` (Cmd+Shift+I; Ctrl+Shift+I on Windows and Linux) reads an export back in, even one edited by hand. Messages already in your history are skipped, and a file with any bad row is refused with the rows listed.
 - Leave `Show ACKs` off for everyday use.
 - Use `Traffic Log` when you need a full event history.
 
@@ -84,6 +84,9 @@ This document mirrors the Help window available from inside APRSWolf.
 
 - Use `Help > APRSWolf Help` from the app menu for the built-in guide.
 - The Help window includes search, topic navigation, setup guidance, and troubleshooting notes.
+- Press Escape to close Help, Preferences, or the About window.
+- Shortcuts, with Ctrl in place of Cmd on Windows and Linux: Preferences (Cmd+,), Help (Cmd+Shift+/), Export Messages (Cmd+Shift+E), Import Messages (Cmd+Shift+I).
+- `APRSWolf > About APRSWolf` shows the version and credits, with links to the project, the release notes, and this Help.
 
 ### Troubleshooting
 
