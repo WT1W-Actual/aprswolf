@@ -363,11 +363,10 @@ See the [project README](../README.md) for quick-start commands. Full release pr
 ```bash
 # 1. Bump package.json version, src-tauri/Cargo.toml, and
 #    src-tauri/tauri.conf.json; refresh the package and Cargo lockfiles.
-#    Keep displayVersion unchanged unless download labels should change.
 # 2. Write release notes (copy RELEASE-NOTES-TEMPLATE.md → docs/releases/X.Y.Z.md)
 #    and add the new version to docs/releases/README.md
 # 3. Commit, then push a version tag:
-git tag v1.0.2 && git push origin v1.0.2
+git tag v1.0.4 && git push origin v1.0.4
 # 4. The `release` GitHub Actions workflow builds all platforms and
 #    attaches every artifact to a single GitHub Release.
 ```
@@ -380,16 +379,19 @@ npm run release:linux             # Linux .deb + .rpm + .AppImage (on Linux); or
 npm run release:windows           # Windows MSI + NSIS .exe (on Windows); or release:windows:no-tests
 ```
 
-macOS and Windows artifacts are unsigned for now; sign/notarize before public
-distribution by adding signing secrets to the `release` workflow.
+macOS and Windows artifacts are not Developer ID signed or notarized; do that before public
+distribution by adding signing secrets to the `release` workflow. The macOS app is ad-hoc
+signed (`bundle.macOS.signingIdentity: "-"`); do not remove this, because the default
+linker-only signature on Apple Silicon makes Gatekeeper report the app as "damaged".
+After building, check with `codesign --verify --deep --strict APRSWolf.app`.
 
 ### Artifact naming and ARM targets
 
 The macOS and Linux ARM artifacts target different operating systems and are not
 interchangeable:
 
-- macOS Apple Silicon uses the `aarch64` label (`APRSWolf_X.Y_aarch64.dmg`).
-- Linux ARM64 uses the `arm64` label (`APRSWolf_X.Y_arm64.deb`, `.rpm`, `.AppImage`),
+- macOS Apple Silicon uses the `aarch64` label (`APRSWolf_X.Y.Z_aarch64.dmg`).
+- Linux ARM64 uses the `arm64` label (`APRSWolf_X.Y.Z_arm64.deb`, `.rpm`, `.AppImage`),
   for ARM64 Linux such as a 64-bit Raspberry Pi.
 
 There is no macOS universal DMG; Intel and Apple Silicon are shipped as separate
@@ -399,6 +401,8 @@ DMGs.
 
 | Version | Date | Key Changes |
 |---------|------|-------------|
+| 1.0.4 | 2026-10-12 | Release filenames use the full `major.minor.patch` version (`displayVersion` now only drives the in-app badge). |
+| 1.0.3 | 2026-10-12 | Fix "damaged" error on Apple Silicon: `tauri.conf.json` sets `bundle.macOS.signingIdentity` to `-` so the whole app is ad-hoc signed with sealed resources. |
 | 1.0.2 | 2026-10-12 | Preferences now provide working standard connection defaults; Open Remote UI launches the system browser. |
 | 1.0.1 | 2026-10-11 | Bug fixes for message delivery, malformed input, remote access, and duplicate Traffic Log lines. |
 | 1.0 | 2026-05-21 | First stable release. Consolidated RX/Mic-E improvements, pop-out received window, in-app help, remote web control parity. |
