@@ -21,7 +21,7 @@ import {
   restoreMessages,
   type MessageGroups,
   type TimelineEntry,
-  oldestSeq,
+  olderPageCursor,
   useMessageSearch,
   withFreshIds,
 } from "./lib/messageHistory";
@@ -134,20 +134,41 @@ function ReceivedWindow() {
     };
   }, []);
 
-  // Load persisted messages on startup
+  // Load persisted messages on startup, and again after File > Import
+  // Messages adds to the history.
   useEffect(() => {
-    (async () => {
+    let active = true;
+    let unlisten: (() => void) | undefined;
+    const load = async (replace: boolean) => {
       try {
         const msgs = await invoke<ReceivedItem[]>("load_received_messages");
-        if (msgs.length > 0) setReceivedItems(withFreshIds(msgs));
+        if (!active) return;
+        if (msgs.length > 0 || replace) setReceivedItems(withFreshIds(msgs));
         setHasOlder(msgs.length >= PAGE_SIZE);
       } catch {/* no persisted messages */}
       try {
         const sent = await invoke<SentItem[]>("load_sent_messages");
-        if (sent.length > 0) setSentItems((prev) => (prev.length > 0 ? prev : withFreshIds(sent)));
+        if (!active) return;
+        if (sent.length > 0) setSentItems((prev) => (prev.length > 0 && !replace ? prev : withFreshIds(sent)));
         setHasOlderSent(sent.length >= PAGE_SIZE);
       } catch {/* no sent history */}
+    };
+    void load(false);
+    (async () => {
+      try {
+        const registered = await (await import("@tauri-apps/api/event")).listen("history_imported", () => {
+          void load(true);
+        });
+        if (!active) registered();
+        else unlisten = registered;
+      } catch {
+        // Browser preview mode.
+      }
     })();
+    return () => {
+      active = false;
+      unlisten?.();
+    };
   }, []);
 
   useEffect(() => {
@@ -280,14 +301,14 @@ function ReceivedWindow() {
       }
       if (hasOlder) {
         const page = await invoke<ReceivedItem[]>("load_received_messages", {
-          beforeSeq: oldestSeq(historyItems),
+          ...olderPageCursor(historyItems),
         });
         setOlderItems((prev) => [...prev, ...withFreshIds(page)]);
         setHasOlder(page.length >= PAGE_SIZE);
       }
       if (hasOlderSent) {
         const page = await invoke<SentItem[]>("load_sent_messages", {
-          beforeSeq: oldestSeq(sentHistory),
+          ...olderPageCursor(sentHistory),
         });
         setOlderSent((prev) => [...prev, ...withFreshIds(page)]);
         setHasOlderSent(page.length >= PAGE_SIZE);

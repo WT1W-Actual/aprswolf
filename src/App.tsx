@@ -740,6 +740,48 @@ function App() {
     };
   }, [applyWebServerStatus, applySettings]);
 
+  // File > Import Messages added to the history: reload both lists from it,
+  // keeping the live copy of any sent message still in flight.
+  useEffect(() => {
+    let active = true;
+    let unlisten: (() => void) | undefined;
+    const reload = async () => {
+      try {
+        const sent = await invoke<SentItem[]>("load_sent_messages");
+        if (active && Array.isArray(sent)) {
+          setSentItems((prev) => {
+            const live = new Map(prev.filter((item) => item.uuid).map((item) => [item.uuid, item]));
+            return sent.map((item) => live.get(item.uuid) ?? { ...item, id: nextId() });
+          });
+        }
+      } catch {/* keep the current list */}
+      try {
+        const stored = await invoke<ReceivedItem[]>("load_received_messages");
+        if (active && Array.isArray(stored)) {
+          setReceivedItems((prev) => {
+            const shown = new Map(prev.filter((item) => item.uuid).map((item) => [item.uuid, item]));
+            return stored.map((item) => shown.get(item.uuid) ?? { ...item, id: nextId() }).slice(0, MAX_RECEIVED_ITEMS);
+          });
+        }
+      } catch {/* keep the current list */}
+    };
+    (async () => {
+      try {
+        const registered = await listen("history_imported", () => {
+          void reload();
+        });
+        if (!active) registered();
+        else unlisten = registered;
+      } catch {
+        // Browser preview mode.
+      }
+    })();
+    return () => {
+      active = false;
+      unlisten?.();
+    };
+  }, []);
+
   async function connect() {
     const portNumber = Number(port);
     if (!Number.isInteger(portNumber) || portNumber <= 0 || portNumber > 65535) {

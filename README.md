@@ -118,7 +118,7 @@ The [End User Guide](docs/END-USER-GUIDE.md) walks through the rest.
 - Keeps sent and received messages in a local database across restarts, and searches all of it from one search field.
 - Stores a packet heard twice (over RF and APRS-IS, or through two digipeaters) only once.
 - Lets you hide or delete messages one at a time, as a selection, or everything a list shows.
-- Exports your message history to a CSV file for a spreadsheet.
+- Exports your message history to a CSV file for a spreadsheet, and imports one back.
 - Shows an unread count for messages addressed to you on the To Me filter, and on the app icon while APRSWolf is in the background.
 - Shows UTC and local time in the header.
 - Opens a separate Messages window with sent and received in one timeline, and a Traffic Log window with every raw packet and event.
@@ -180,6 +180,16 @@ With nothing changed, the file holds sent messages and received messages, querie
 - **Include positions, weather, and other short-lived packets**, off by default. Turning it on warns that those packets are removed after the retention period (7 days by default), so only the ones still stored are exported.
 
 The columns are `uuid`, `timestamp` (ISO 8601, UTC), `direction` (sent or received), `from`, `to`, `body`, `aprs_type`, `path`, `message_number`, `status` (sent messages' delivery status), and `hidden`. Text that starts with `=`, `+`, `-`, or `@` gets a leading apostrophe so a spreadsheet shows it as typed rather than running it as a formula.
+
+### Importing messages
+
+**File > Import Messages...** (Cmd+Shift+I on macOS, Ctrl+Shift+I elsewhere) reads a CSV export back into your history, from this computer or another one, including a file you edited by hand. Messages land in the lists at their own time.
+
+- Columns are matched by name in any order. `direction`, `from`, `body`, and `timestamp` are required; the rest are optional and unknown columns are ignored.
+- A message whose `uuid` is already in your history is skipped, so importing the same file twice changes nothing. A row with an empty `uuid` gets a new one, unless the same message (direction, sender, addressee, text, and time) is already there.
+- The apostrophe that export puts in front of formula-like text is removed.
+- Every row is checked before anything is stored: callsigns, a known `aprs_type`, a time from 1990 to now, a valid `uuid`, a message number of up to five letters or digits, and a status of acked, failed, or expired for sent messages. If any row fails, nothing is imported and the dialog lists the rows and what's wrong.
+- Positions, weather, and other short-lived packets older than the retention period (Preferences > Message History) bring up a warning with their count before anything is stored. **Cancel** leaves your history as it was.
 
 ## APRS And AX.25 Behavior
 

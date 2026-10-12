@@ -15,7 +15,7 @@ import {
 export const PAGE_SIZE = 200;
 
 /** Any message row from the history: received or sent. */
-type HistoryItem = { id: number; uuid?: string; seq?: number; hidden?: boolean };
+type HistoryItem = { id: number; uuid?: string; seq?: number; hidden?: boolean; timestamp: number };
 
 /** Keep the first copy of each stored message, in order. */
 export function dedupeByUuid<T extends HistoryItem>(items: T[]): T[] {
@@ -28,15 +28,23 @@ export function dedupeByUuid<T extends HistoryItem>(items: T[]): T[] {
   });
 }
 
-/** Smallest stored sequence among `items`: the cursor for the next older page. */
-export function oldestSeq(items: HistoryItem[]): number | undefined {
-  let oldest: number | undefined;
+/**
+ * Where the next older page starts: the time and sequence of the last
+ * stored message in `items` when they run newest first by message time.
+ */
+export function olderPageCursor(items: HistoryItem[]): { beforeTime?: number; beforeSeq?: number } {
+  let last: HistoryItem | undefined;
   for (const item of items) {
-    if (typeof item.seq === "number" && (oldest === undefined || item.seq < oldest)) {
-      oldest = item.seq;
+    if (typeof item.seq !== "number") continue;
+    if (
+      !last ||
+      item.timestamp < last.timestamp ||
+      (item.timestamp === last.timestamp && item.seq < (last.seq as number))
+    ) {
+      last = item;
     }
   }
-  return oldest;
+  return last ? { beforeTime: last.timestamp, beforeSeq: last.seq } : {};
 }
 
 /** Time alone for today's messages; date and time once history spans days. */
@@ -103,7 +111,7 @@ export function useMessageSearch<T extends HistoryItem = ReceivedItem>(
     try {
       const hits = await invoke<T[]>(command, {
         query: query.trim(),
-        beforeSeq: oldestSeq(results),
+        ...olderPageCursor(results),
       });
       setResults((prev) => dedupeByUuid([...(prev ?? []), ...withFreshIds(hits)]));
       setHasMore(hits.length >= PAGE_SIZE);

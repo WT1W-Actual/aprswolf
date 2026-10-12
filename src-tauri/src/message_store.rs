@@ -180,6 +180,13 @@ CREATE TABLE meta (
 );
 ";
 
+/// Indexes for lists ordered by message time, so imported messages sit
+/// where their time puts them.
+const SCHEMA_TIME_ORDER: &str = "
+CREATE INDEX received_time ON received(timestamp, seq);
+CREATE INDEX sent_time ON sent(created_at, seq);
+";
+
 fn migrate(conn: &Connection) -> rusqlite::Result<()> {
     let version: i64 = conn.pragma_query_value(None, "user_version", |row| row.get(0))?;
     if version < 1 {
@@ -197,6 +204,10 @@ fn migrate(conn: &Connection) -> rusqlite::Result<()> {
     if version < 4 {
         conn.execute_batch(SCHEMA_EXPORT_MARK)?;
         conn.pragma_update(None, "user_version", 4)?;
+    }
+    if version < 5 {
+        conn.execute_batch(SCHEMA_TIME_ORDER)?;
+        conn.pragma_update(None, "user_version", 5)?;
     }
     Ok(())
 }
@@ -431,13 +442,28 @@ fn row_to_value(data: String, seq: i64, hidden: bool) -> Value {
     value
 }
 
-/// One page of the list, newest first, older than `before_seq` when given.
-/// Hidden rows are left out.
-fn page(conn: &Connection, before_seq: Option<i64>, limit: usize) -> rusqlite::Result<Vec<Value>> {
+/// Where the next older page starts: the message time and sequence of the
+/// last message already shown. Lists run newest first by message time, so
+/// an imported message sits where its time puts it rather than at the top.
+type Cursor = (i64, i64);
+
+fn cursor_values(before: Option<Cursor>) -> (i64, i64) {
+    before.unwrap_or((i64::MAX, i64::MAX))
+}
+
+fn cursor(before_time: Option<i64>, before_seq: Option<i64>) -> Option<Cursor> {
+    before_seq.map(|seq| (before_time.unwrap_or(i64::MAX), seq))
+}
+
+/// One page of the list, newest first by message time, after `before`
+/// when given. Hidden rows are left out.
+fn page(conn: &Connection, before: Option<Cursor>, limit: usize) -> rusqlite::Result<Vec<Value>> {
+    let (time, seq) = cursor_values(before);
     let mut stmt = conn.prepare(
-        "SELECT data, seq, hidden FROM received WHERE hidden = 0 AND seq < ?1 ORDER BY seq DESC LIMIT ?2",
+        "SELECT data, seq, hidden FROM received WHERE hidden = 0 AND (timestamp, seq) < (?1, ?2)
+         ORDER BY timestamp DESC, seq DESC LIMIT ?3",
     )?;
-    let rows = stmt.query_map(params![before_seq.unwrap_or(i64::MAX), limit as i64], |row| {
+    let rows = stmt.query_map(params![time, seq, limit as i64], |row| {
         Ok(row_to_value(row.get(0)?, row.get(1)?, row.get(2)?))
     })?;
     rows.collect()
@@ -462,16 +488,17 @@ fn fts_query(input: &str) -> Option<String> {
 
 /// Rows whose callsigns or text match every word in `query`, newest first,
 /// hidden ones included.
-fn search(conn: &Connection, query: &str, before_seq: Option<i64>, limit: usize) -> rusqlite::Result<Vec<Value>> {
+fn search(conn: &Connection, query: &str, before: Option<Cursor>, limit: usize) -> rusqlite::Result<Vec<Value>> {
     let Some(fts) = fts_query(query) else {
         return Ok(Vec::new());
     };
+    let (time, seq) = cursor_values(before);
     let mut stmt = conn.prepare(
         "SELECT r.data, r.seq, r.hidden FROM received_fts f JOIN received r ON r.seq = f.rowid
-         WHERE received_fts MATCH ?1 AND r.seq < ?2
-         ORDER BY r.seq DESC LIMIT ?3",
+         WHERE received_fts MATCH ?1 AND (r.timestamp, r.seq) < (?2, ?3)
+         ORDER BY r.timestamp DESC, r.seq DESC LIMIT ?4",
     )?;
-    let rows = stmt.query_map(params![fts, before_seq.unwrap_or(i64::MAX), limit as i64], |row| {
+    let rows = stmt.query_map(params![fts, time, seq, limit as i64], |row| {
         Ok(row_to_value(row.get(0)?, row.get(1)?, row.get(2)?))
     })?;
     rows.collect()
@@ -579,28 +606,31 @@ fn sent_row_to_value(row: &rusqlite::Row) -> rusqlite::Result<Value> {
     }))
 }
 
-/// One page of the sent list, newest first, older than `before_seq` when
+/// One page of the sent list, newest first by message time, after `before` when
 /// given. Hidden rows are left out.
-fn sent_page(conn: &Connection, before_seq: Option<i64>, limit: usize) -> rusqlite::Result<Vec<Value>> {
+fn sent_page(conn: &Connection, before: Option<Cursor>, limit: usize) -> rusqlite::Result<Vec<Value>> {
+    let (time, seq) = cursor_values(before);
     let mut stmt = conn.prepare(&format!(
-        "SELECT {SENT_COLUMNS} FROM sent s WHERE s.hidden = 0 AND s.seq < ?1 ORDER BY s.seq DESC LIMIT ?2"
+        "SELECT {SENT_COLUMNS} FROM sent s WHERE s.hidden = 0 AND (s.created_at, s.seq) < (?1, ?2)
+         ORDER BY s.created_at DESC, s.seq DESC LIMIT ?3"
     ))?;
-    let rows = stmt.query_map(params![before_seq.unwrap_or(i64::MAX), limit as i64], sent_row_to_value)?;
+    let rows = stmt.query_map(params![time, seq, limit as i64], sent_row_to_value)?;
     rows.collect()
 }
 
 /// Sent messages whose addressee or text match every word in `query`,
 /// newest first, hidden ones included.
-fn search_sent(conn: &Connection, query: &str, before_seq: Option<i64>, limit: usize) -> rusqlite::Result<Vec<Value>> {
+fn search_sent(conn: &Connection, query: &str, before: Option<Cursor>, limit: usize) -> rusqlite::Result<Vec<Value>> {
     let Some(fts) = fts_query(query) else {
         return Ok(Vec::new());
     };
+    let (time, seq) = cursor_values(before);
     let mut stmt = conn.prepare(&format!(
         "SELECT {SENT_COLUMNS} FROM sent_fts f JOIN sent s ON s.seq = f.rowid
-         WHERE sent_fts MATCH ?1 AND s.seq < ?2
-         ORDER BY s.seq DESC LIMIT ?3"
+         WHERE sent_fts MATCH ?1 AND (s.created_at, s.seq) < (?2, ?3)
+         ORDER BY s.created_at DESC, s.seq DESC LIMIT ?4"
     ))?;
-    let rows = stmt.query_map(params![fts, before_seq.unwrap_or(i64::MAX), limit as i64], sent_row_to_value)?;
+    let rows = stmt.query_map(params![fts, time, seq, limit as i64], sent_row_to_value)?;
     rows.collect()
 }
 
@@ -612,9 +642,14 @@ pub fn record_sent(app: &AppHandle, rec: &SentRecord) {
 
 /// Newest-first sent messages, one page at a time.
 #[tauri::command]
-pub fn load_sent_messages(app: AppHandle, before_seq: Option<i64>, limit: Option<usize>) -> Vec<Value> {
+pub fn load_sent_messages(
+    app: AppHandle,
+    before_time: Option<i64>,
+    before_seq: Option<i64>,
+    limit: Option<usize>,
+) -> Vec<Value> {
     let limit = limit.unwrap_or(PAGE_SIZE).min(PAGE_SIZE);
-    with_store(&app, |store| sent_page(&store.conn, before_seq, limit).map_err(|err| err.to_string())).unwrap_or_default()
+    with_store(&app, |store| sent_page(&store.conn, cursor(before_time, before_seq), limit).map_err(|err| err.to_string())).unwrap_or_default()
 }
 
 /// Which list a clear applies to.
@@ -694,11 +729,12 @@ pub fn clear_messages(app: AppHandle, list: MessageList, uuids: Vec<String>, del
 pub fn search_sent_messages(
     app: AppHandle,
     query: String,
+    before_time: Option<i64>,
     before_seq: Option<i64>,
     limit: Option<usize>,
 ) -> Result<Vec<Value>, String> {
     let limit = limit.unwrap_or(PAGE_SIZE).min(PAGE_SIZE);
-    with_store(&app, |store| search_sent(&store.conn, &query, before_seq, limit).map_err(|err| err.to_string()))
+    with_store(&app, |store| search_sent(&store.conn, &query, cursor(before_time, before_seq), limit).map_err(|err| err.to_string()))
 }
 
 const LAST_EXPORT_KEY: &str = "last_new_only_export";
@@ -753,17 +789,147 @@ pub fn last_new_only_export(app: AppHandle) -> Result<Option<i64>, String> {
     with_store(&app, |store| last_export(&store.conn).map_err(|err| err.to_string()))
 }
 
+/// How an import went.
+#[derive(Debug, PartialEq)]
+pub struct ImportSummary {
+    pub added: usize,
+    pub skipped: usize,
+}
+
+/// Received rows in `rows` of a short-lived type older than the retention
+/// window, which the import dialog warns about. Zero when retention keeps
+/// everything.
+pub fn old_short_lived(rows: &[crate::message_import::ImportRow], retention_days: u32, now: i64) -> usize {
+    if retention_days == 0 {
+        return 0;
+    }
+    let cutoff = now - i64::from(retention_days) * DAY_MS;
+    rows.iter()
+        .filter(|row| row.direction == crate::message_import::Direction::Received)
+        .filter(|row| !is_conversation(&row.aprs_type, row.to.starts_with("BLN"), &row.body))
+        .filter(|row| row.timestamp < cutoff)
+        .count()
+}
+
+/// Store validated rows in one transaction. A row whose UUID is already
+/// stored is skipped, so importing a file twice changes nothing. A row
+/// without a UUID gets one, unless a message with the same direction,
+/// sender, addressee, text, and time is already stored. Imported rows count
+/// as stored now, for retention and for new-only exports.
+fn import(conn: &Connection, rows: &[crate::message_import::ImportRow], now: i64) -> rusqlite::Result<ImportSummary> {
+    use crate::message_import::Direction;
+    let tx = conn.unchecked_transaction()?;
+    let mut summary = ImportSummary { added: 0, skipped: 0 };
+    for row in rows {
+        let table = if row.direction == Direction::Sent { "sent" } else { "received" };
+        let exists = match &row.uuid {
+            Some(uuid) => tx
+                .query_row(&format!("SELECT 1 FROM {table} WHERE uuid = ?1"), params![uuid], |_| Ok(()))
+                .optional()?
+                .is_some(),
+            None => {
+                let time_column = if row.direction == Direction::Sent { "created_at" } else { "timestamp" };
+                tx.query_row(
+                    &format!(
+                        "SELECT 1 FROM {table} WHERE from_call = ?1 AND coalesce(to_call, '') = ?2
+                         AND body = ?3 AND {time_column} = ?4"
+                    ),
+                    params![row.from, row.to, row.body, row.timestamp],
+                    |_| Ok(()),
+                )
+                .optional()?
+                .is_some()
+            }
+        };
+        if exists {
+            summary.skipped += 1;
+            continue;
+        }
+        let uuid = row.uuid.clone().unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+        match row.direction {
+            Direction::Sent => {
+                tx.execute(
+                    "INSERT INTO sent (uuid, created_at, updated_at, stored_at, from_call, to_call, body, path,
+                                       aprs_id, status, attempts, detail, hidden)
+                     VALUES (?1, ?2, ?3, ?3, ?4, ?5, ?6, ?7, ?8, ?9, 0, 'imported', ?10)",
+                    params![
+                        uuid,
+                        row.timestamp,
+                        now,
+                        row.from,
+                        row.to,
+                        row.body,
+                        row.path,
+                        row.message_number,
+                        row.status,
+                        row.hidden
+                    ],
+                )?;
+            }
+            Direction::Received => {
+                let to = (!row.to.is_empty()).then_some(row.to.as_str());
+                // Rebuild the message frame so the message number reads
+                // back the way it does for a live packet.
+                let info_text = match to {
+                    Some(to) if row.aprs_type == "msg" || row.aprs_type == "qry" => {
+                        let number = if row.message_number.is_empty() { String::new() } else { format!("{{{}", row.message_number) };
+                        format!(":{to:<9}:{}{number}", row.body)
+                    }
+                    _ => row.body.clone(),
+                };
+                let path: Vec<&str> = row.path.split(',').filter(|hop| !hop.is_empty()).collect();
+                let message = serde_json::json!({
+                    "uuid": uuid,
+                    "from": row.from,
+                    "to": to,
+                    "body": row.body,
+                    "aprsType": row.aprs_type,
+                    "isBulletin": row.to.starts_with("BLN"),
+                    "micEDecoded": false,
+                    "path": path,
+                    "source": row.from,
+                    "info_text": info_text,
+                    "text": format!("{} > IMPORT: {info_text}", row.from),
+                    "imported": true,
+                });
+                insert_row(&tx, &message, now, row.timestamp)?;
+                if row.hidden {
+                    tx.execute("UPDATE received SET hidden = 1 WHERE uuid = ?1", params![uuid])?;
+                }
+            }
+        }
+        summary.added += 1;
+    }
+    tx.commit()?;
+    Ok(summary)
+}
+
+/// Store rows read from an import file.
+pub fn import_rows(app: &AppHandle, rows: &[crate::message_import::ImportRow]) -> Result<ImportSummary, String> {
+    with_store(app, |store| {
+        let summary = import(&store.conn, rows, now_ms()).map_err(|err| format!("import failed: {err}"))?;
+        store.recent = RecentPackets::default();
+        Ok(summary)
+    })
+}
+
 /// The newest page of history, for the web remote's state snapshot.
 pub fn recent(app: &AppHandle) -> Vec<Value> {
     with_store(app, |store| page(&store.conn, None, PAGE_SIZE).map_err(|err| err.to_string())).unwrap_or_default()
 }
 
-/// Newest-first history, one page at a time. Pass the smallest `seq`
-/// already shown as `before_seq` to get the next older page.
+/// Newest-first history, one page at a time. Pass the time and `seq` of
+/// the last message shown as `before_time` and `before_seq` to get the
+/// next older page.
 #[tauri::command]
-pub fn load_received_messages(app: AppHandle, before_seq: Option<i64>, limit: Option<usize>) -> Vec<Value> {
+pub fn load_received_messages(
+    app: AppHandle,
+    before_time: Option<i64>,
+    before_seq: Option<i64>,
+    limit: Option<usize>,
+) -> Vec<Value> {
     let limit = limit.unwrap_or(PAGE_SIZE).min(PAGE_SIZE);
-    with_store(&app, |store| page(&store.conn, before_seq, limit).map_err(|err| err.to_string())).unwrap_or_default()
+    with_store(&app, |store| page(&store.conn, cursor(before_time, before_seq), limit).map_err(|err| err.to_string())).unwrap_or_default()
 }
 
 /// Full-text search over callsigns and message text across all history.
@@ -771,17 +937,24 @@ pub fn load_received_messages(app: AppHandle, before_seq: Option<i64>, limit: Op
 pub fn search_received_messages(
     app: AppHandle,
     query: String,
+    before_time: Option<i64>,
     before_seq: Option<i64>,
     limit: Option<usize>,
 ) -> Result<Vec<Value>, String> {
     let limit = limit.unwrap_or(PAGE_SIZE).min(PAGE_SIZE);
-    with_store(&app, |store| search(&store.conn, &query, before_seq, limit).map_err(|err| err.to_string()))
+    with_store(&app, |store| search(&store.conn, &query, cursor(before_time, before_seq), limit).map_err(|err| err.to_string()))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use serde_json::json;
+
+    /// The cursor just past `row`, as a window builds it from the last
+    /// message it shows.
+    fn after(row: &Value) -> Option<Cursor> {
+        Some((row["timestamp"].as_i64().unwrap(), row["seq"].as_i64().unwrap()))
+    }
 
     fn memory_db() -> Connection {
         let conn = Connection::open_in_memory().unwrap();
@@ -887,7 +1060,7 @@ mod tests {
         let rows = sent_page(&conn, None, PAGE_SIZE).unwrap();
         let order: Vec<&str> = rows.iter().map(|r| r["uuid"].as_str().unwrap()).collect();
         assert_eq!(order, ["s-2", "s-1", "s-0"]);
-        let older = sent_page(&conn, rows[0]["seq"].as_i64(), PAGE_SIZE).unwrap();
+        let older = sent_page(&conn, after(&rows[0]), PAGE_SIZE).unwrap();
         assert_eq!(older.len(), 2);
     }
 
@@ -981,7 +1154,7 @@ mod tests {
         assert_eq!(by_call[0]["body"], "net check 4");
         let by_text = search_sent(&conn, "net check", None, 2).unwrap();
         assert_eq!(by_text.len(), 2);
-        let older = search_sent(&conn, "net check", by_text[1]["seq"].as_i64(), 200).unwrap();
+        let older = search_sent(&conn, "net check", after(&by_text[1]), 200).unwrap();
         assert_eq!(older.len(), 3);
         assert!(search_sent(&conn, "zzz", None, 200).unwrap().is_empty());
     }
@@ -1020,7 +1193,7 @@ mod tests {
         .unwrap();
         migrate(&conn).unwrap();
         let version: i64 = conn.pragma_query_value(None, "user_version", |row| row.get(0)).unwrap();
-        assert_eq!(version, 4);
+        assert_eq!(version, 5);
         assert_eq!(search_sent(&conn, "W6TEST", None, 200).unwrap().len(), 1);
         let stored_at: i64 = conn.query_row("SELECT stored_at FROM sent WHERE uuid = 'old'", [], |row| row.get(0)).unwrap();
         assert_eq!(stored_at, 1000);
@@ -1033,7 +1206,7 @@ mod tests {
         conn.pragma_update(None, "user_version", 1).unwrap();
         migrate(&conn).unwrap();
         let version: i64 = conn.pragma_query_value(None, "user_version", |row| row.get(0)).unwrap();
-        assert_eq!(version, 4);
+        assert_eq!(version, 5);
         upsert_sent(&conn, &sent("s-1", "N6TEST-7", "queued", 0), 1_000).unwrap();
     }
 
@@ -1046,10 +1219,9 @@ mod tests {
         let first = page(&conn, None, PAGE_SIZE).unwrap();
         assert_eq!(first.len(), 200);
         assert_eq!(first[0]["body"], "note 449");
-        let oldest_shown = first.last().unwrap()["seq"].as_i64().unwrap();
-        let second = page(&conn, Some(oldest_shown), PAGE_SIZE).unwrap();
+        let second = page(&conn, after(first.last().unwrap()), PAGE_SIZE).unwrap();
         assert_eq!(second[0]["body"], "note 249");
-        let third = page(&conn, Some(second.last().unwrap()["seq"].as_i64().unwrap()), PAGE_SIZE).unwrap();
+        let third = page(&conn, after(second.last().unwrap()), PAGE_SIZE).unwrap();
         assert_eq!(third.len(), 50);
         assert_eq!(third.last().unwrap()["body"], "note 0");
     }
@@ -1159,6 +1331,77 @@ mod tests {
         // A full export leaves the mark alone.
         assert_eq!(export_count(&conn, &ExportFilter::default(), 6_000), 3);
         assert_eq!(last_export(&conn).unwrap(), Some(5_000));
+    }
+
+    fn export_text(conn: &Connection) -> String {
+        let mut out = Vec::new();
+        export(conn, &mut out, &Default::default(), i64::MAX).unwrap();
+        String::from_utf8(out).unwrap()
+    }
+
+    #[test]
+    fn an_export_imported_into_an_empty_store_exports_the_same() {
+        let conn = memory_db();
+        let mut hello = message("N6TEST-7", Some("AD6DM-15"), "-12 dB, say \"hi\"", "msg");
+        hello["info_text"] = json!(":AD6DM-15 :-12 dB, say \"hi\"{7");
+        hello["path"] = json!(["WIDE1-1*", "WIDE2-1"]);
+        record(&conn, &hello, 1_791_830_400_000).unwrap();
+        record(&conn, &message("W6TEST-1", Some("BLN1"), "Net at 1930", "msg"), 1_791_830_460_000).unwrap();
+        let mut sent_row = sent("6f1c2b7e-0d5a-4c1e-9f0b-2a3d4e5f6a7b", "N6TEST-7", "acked", 1);
+        sent_row.created_at = 1_791_830_520_000;
+        upsert_sent(&conn, &sent_row, 1_791_830_530_000).unwrap();
+        let bulletin_uuid: String =
+            conn.query_row("SELECT uuid FROM received WHERE to_call = 'BLN1'", [], |r| r.get(0)).unwrap();
+        clear(&conn, MessageList::Received, &[bulletin_uuid], false).unwrap();
+        let original = export_text(&conn);
+
+        let rows = crate::message_import::parse_csv(&original, 1_791_830_600_000).unwrap();
+        let fresh = memory_db();
+        assert_eq!(import(&fresh, &rows, 1_791_830_600_000).unwrap(), ImportSummary { added: 3, skipped: 0 });
+        assert_eq!(export_text(&fresh), original);
+
+        // Importing the same file again changes nothing.
+        assert_eq!(import(&fresh, &rows, 1_791_830_700_000).unwrap(), ImportSummary { added: 0, skipped: 3 });
+        assert_eq!(export_text(&fresh), original);
+    }
+
+    #[test]
+    fn a_hand_added_row_without_a_uuid_is_stored_once() {
+        let conn = memory_db();
+        let csv = "direction,from,to,body,timestamp\nreceived,K6TEST-9,AD6DM-15,Typed in by hand,2026-10-12 18:00:00\n";
+        let rows = crate::message_import::parse_csv(csv, 1_791_830_400_000).unwrap();
+        assert_eq!(import(&conn, &rows, 1_000).unwrap().added, 1);
+        assert_eq!(import(&conn, &rows, 2_000).unwrap(), ImportSummary { added: 0, skipped: 1 });
+        let uuid: String = conn.query_row("SELECT uuid FROM received", [], |r| r.get(0)).unwrap();
+        assert!(uuid::Uuid::parse_str(&uuid).is_ok());
+    }
+
+    #[test]
+    fn old_short_lived_rows_are_counted_for_the_warning() {
+        let csv = "direction,from,to,body,timestamp,aprs_type\n\
+                   received,N7TEST-9,,!3830.00N/12130.00W>,2026-09-01T00:00:00Z,pos\n\
+                   received,N7TEST-9,,!3830.00N/12130.00W>,2026-10-12T00:00:00Z,pos\n\
+                   received,K6TEST-9,AD6DM-15,old chat,2026-09-01T00:00:00Z,msg\n";
+        let now = 1_791_830_400_000;
+        let rows = crate::message_import::parse_csv(csv, now).unwrap();
+        assert_eq!(old_short_lived(&rows, 7, now), 1);
+        assert_eq!(old_short_lived(&rows, 0, now), 0);
+    }
+
+    #[test]
+    fn lists_run_by_message_time_so_imports_land_in_place() {
+        let conn = memory_db();
+        record(&conn, &message("N6TEST-7", Some("AD6DM-15"), "live at noon", "msg"), 12 * 3_600_000).unwrap();
+        // Stored later, but sent earlier: an import of an older message.
+        let mut old = message("K6TEST-9", Some("AD6DM-15"), "imported from 10:00", "msg");
+        old["uuid"] = json!("00000000-0000-4000-8000-000000000001");
+        insert_row(&conn, &old, 13 * 3_600_000, 10 * 3_600_000).unwrap();
+        record(&conn, &message("N6TEST-7", Some("AD6DM-15"), "live at 2pm", "msg"), 14 * 3_600_000).unwrap();
+
+        let bodies = |rows: Vec<Value>| rows.iter().map(|v| v["body"].as_str().unwrap().to_string()).collect::<Vec<_>>();
+        let first = page(&conn, None, 2).unwrap();
+        assert_eq!(bodies(first.clone()), vec!["live at 2pm", "live at noon"]);
+        assert_eq!(bodies(page(&conn, after(&first[1]), 2).unwrap()), vec!["imported from 10:00"]);
     }
 
     #[test]

@@ -1209,7 +1209,10 @@ describe("App", () => {
     fireEvent.click(screen.getByRole("button", { name: "Load older messages" }));
 
     expect(await screen.findByText("From last week")).toBeInTheDocument();
-    expect(invokeMock).toHaveBeenCalledWith("load_received_messages", { beforeSeq: 801 });
+    expect(invokeMock).toHaveBeenCalledWith("load_received_messages", {
+      beforeTime: newestPage[199].timestamp,
+      beforeSeq: 801,
+    });
     expect(screen.queryByRole("button", { name: "Load older messages" })).not.toBeInTheDocument();
   });
 

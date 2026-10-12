@@ -265,6 +265,12 @@ Left as it opens, the window exports your sent messages and received messages, q
 - Enter callsigns, separated by commas, to keep messages to or from them. `K6ABC` matches every SSID; `K6ABC-9` matches only that one.
 - Check `Include positions, weather, and other short-lived packets` to add them. APRSWolf warns first that those packets are removed after the retention period set in Preferences, so only the ones still stored are exported.
 
+### Importing Messages
+
+Choose `File > Import Messages...` (Cmd+Shift+I on macOS, Ctrl+Shift+I on Windows and Linux) and pick a CSV export, from this computer or another, even one you edited in a spreadsheet. Imported messages show in the lists at their own time. Messages already in your history are skipped, so importing a file twice does no harm. A row you typed in yourself needs `direction` (sent or received), `from`, `body`, and `timestamp`; sent rows also need `to` and a `status` of acked, failed, or expired.
+
+APRSWolf checks every row first. If one is wrong, nothing is imported, and the dialog names each bad row and what to fix. If the file holds positions, weather, or other short-lived packets older than your retention setting, you're asked before they're stored; `Cancel` leaves your history unchanged.
+
 ### Show ACKs
 
 The `Show ACKs` checkbox controls whether APRS ACK frames appear in the received list.
