@@ -54,6 +54,17 @@ pub struct ExportFilter {
     pub include_short_lived: bool,
 }
 
+impl ExportFilter {
+    /// True when anything besides new-only leaves messages out. Such an
+    /// export doesn't cover everything new, so it must not move the mark.
+    pub fn narrows(&self) -> bool {
+        matches!(self.direction.as_str(), "sent" | "received")
+            || self.from_ms.is_some()
+            || self.to_ms.is_some()
+            || self.callsigns.iter().any(|c| !c.trim().is_empty())
+    }
+}
+
 /// One exported message, in `COLUMNS` order.
 struct Row {
     timestamp: i64,
@@ -172,7 +183,9 @@ fn iso_utc(ms: i64) -> String {
 /// with =, +, -, @, tab, or carriage return) gets a leading apostrophe so it
 /// shows as typed.
 fn field(value: &str) -> String {
-    let guarded = if value.starts_with(['=', '+', '-', '@', '\t', '\r']) {
+    // Import strips one apostrophe from any run of them before a formula
+    // character, so a value that already starts that way gets one more.
+    let guarded = if value.trim_start_matches('\'').starts_with(['=', '+', '-', '@', '\t', '\r']) {
         format!("'{value}")
     } else {
         value.to_string()
@@ -240,6 +253,8 @@ mod tests {
         assert_eq!(field("+1"), "\"'+1\"");
         assert_eq!(field("-73"), "\"'-73\"");
         assert_eq!(field("@home"), "\"'@home\"");
+        assert_eq!(field("'-) wink"), "\"''-) wink\"");
+        assert_eq!(field("'tis"), "\"'tis\"");
         assert_eq!(field("WIDE1-1,WIDE2-1"), "\"WIDE1-1,WIDE2-1\"");
     }
 

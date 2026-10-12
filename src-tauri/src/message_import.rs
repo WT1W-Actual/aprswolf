@@ -99,7 +99,7 @@ fn parse_records(text: &str) -> Result<Vec<Vec<String>>, String> {
 /// run as a formula.
 fn unguard(value: &str) -> &str {
     match value.strip_prefix('\'') {
-        Some(rest) if rest.starts_with(['=', '+', '-', '@', '\t', '\r']) => rest,
+        Some(rest) if rest.trim_start_matches('\'').starts_with(['=', '+', '-', '@', '\t', '\r']) => rest,
         _ => value,
     }
 }
@@ -190,8 +190,12 @@ pub fn parse_timestamp(value: &str) -> Option<i64> {
     Some(ms - offset_ms)
 }
 
+/// Clock difference allowed between the file's times and this computer.
+const FUTURE_SLACK_MS: i64 = 5 * 60_000;
+
 /// Parse and validate a whole export. `now` bounds timestamps: nothing
-/// before 1990 or more than a day in the future is accepted.
+/// before 1990 or more than a few minutes in the future is accepted, since
+/// lists sort by message time and a future row would sit above live traffic.
 pub fn parse_csv(text: &str, now: i64) -> Result<Vec<ImportRow>, String> {
     let text = text.strip_prefix('\u{feff}').unwrap_or(text);
     let records = parse_records(text)?;
@@ -215,7 +219,7 @@ pub fn parse_csv(text: &str, now: i64) -> Result<Vec<ImportRow>, String> {
     }
 
     let earliest = parse_timestamp("1990-01-01").expect("valid date");
-    let latest = now + 86_400_000;
+    let latest = now + FUTURE_SLACK_MS;
     let mut out = Vec::with_capacity(rows.len());
     let mut errors = Vec::new();
     for (index, record) in rows.iter().enumerate() {
@@ -296,7 +300,9 @@ fn validate_row(get: &dyn Fn(&str) -> String, earliest: i64, latest: i64) -> Res
     let timestamp = parse_timestamp(&raw_time)
         .ok_or_else(|| format!("timestamp \"{raw_time}\" is not a date and time like 2026-10-12T18:40:00Z."))?;
     if timestamp < earliest || timestamp > latest {
-        return Err(format!("timestamp \"{raw_time}\" is before 1990 or in the future."));
+        return Err(format!(
+            "timestamp \"{raw_time}\" is before 1990 or in the future. A time without a zone is read as UTC."
+        ));
     }
 
     let uuid = match get("uuid").trim() {
@@ -396,6 +402,14 @@ mod tests {
     }
 
     #[test]
+    fn a_body_that_starts_with_an_apostrophe_keeps_it() {
+        assert_eq!(unguard("''-) wink"), "'-) wink");
+        assert_eq!(unguard("'''=x"), "''=x");
+        assert_eq!(unguard("'tis"), "'tis");
+        assert_eq!(unguard("'-73"), "-73");
+    }
+
+    #[test]
     fn missing_required_columns_are_refused_by_name() {
         let err = parse_csv("\"uuid\",\"from\",\"body\"\r\n\"\",\"N6TEST\",\"hi\"\r\n", NOW).unwrap_err();
         assert!(err.contains("has no direction, timestamp columns"), "{err}");
@@ -425,6 +439,17 @@ mod tests {
         ] {
             assert!(err.contains(expected), "missing {expected} in {err}");
         }
+    }
+
+    #[test]
+    fn times_more_than_a_few_minutes_ahead_are_refused() {
+        let row = |time: &str| {
+            format!("{HEADER}\"\",\"{time}\",\"received\",\"N6TEST-7\",\"\",\"x\",\"msg\",\"\",\"\",\"\",\"\"\r\n")
+        };
+        // NOW is 18:40:00Z; a local time typed east of UTC reads as hours ahead.
+        assert!(parse_csv(&row("2026-10-12 18:44:00"), NOW).is_ok());
+        let err = parse_csv(&row("2026-10-12 20:40:00"), NOW).unwrap_err();
+        assert!(err.contains("read as UTC"), "{err}");
     }
 
     #[test]

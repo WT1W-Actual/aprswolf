@@ -221,6 +221,11 @@ function ExportWindow() {
               ? "No new-only export yet, so the first one includes everything."
               : `Last new-only export: ${new Date(lastExport).toLocaleString()}`}
           </span>
+          {newOnly && (direction !== "both" || (limitDates && (fromDate || toDate)) || callsigns.trim() !== "") ? (
+            <span className="field-hint">
+              With other filters on, this export won't count as the last new-only export.
+            </span>
+          ) : null}
         </section>
 
         <section className="panel preferences-panel">

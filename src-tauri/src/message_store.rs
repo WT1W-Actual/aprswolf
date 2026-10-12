@@ -187,27 +187,18 @@ CREATE INDEX received_time ON received(timestamp, seq);
 CREATE INDEX sent_time ON sent(created_at, seq);
 ";
 
+/// Each step and its version bump commit together, so a crash mid-step
+/// leaves the database at the old version, ready to run the step again.
 fn migrate(conn: &Connection) -> rusqlite::Result<()> {
     let version: i64 = conn.pragma_query_value(None, "user_version", |row| row.get(0))?;
-    if version < 1 {
-        conn.execute_batch(SCHEMA)?;
-        conn.pragma_update(None, "user_version", 1)?;
-    }
-    if version < 2 {
-        conn.execute_batch(SCHEMA_SENT)?;
-        conn.pragma_update(None, "user_version", 2)?;
-    }
-    if version < 3 {
-        conn.execute_batch(SCHEMA_SEARCH_SENT)?;
-        conn.pragma_update(None, "user_version", 3)?;
-    }
-    if version < 4 {
-        conn.execute_batch(SCHEMA_EXPORT_MARK)?;
-        conn.pragma_update(None, "user_version", 4)?;
-    }
-    if version < 5 {
-        conn.execute_batch(SCHEMA_TIME_ORDER)?;
-        conn.pragma_update(None, "user_version", 5)?;
+    let steps = [SCHEMA, SCHEMA_SENT, SCHEMA_SEARCH_SENT, SCHEMA_EXPORT_MARK, SCHEMA_TIME_ORDER];
+    for (target, sql) in (1..).zip(steps) {
+        if version < target {
+            let tx = conn.unchecked_transaction()?;
+            tx.execute_batch(sql)?;
+            tx.pragma_update(None, "user_version", target)?;
+            tx.commit()?;
+        }
     }
     Ok(())
 }
@@ -746,8 +737,9 @@ fn last_export(conn: &Connection) -> rusqlite::Result<Option<i64>> {
     Ok(value.and_then(|v| v.parse().ok()))
 }
 
-/// Write the messages `filter` selects to `out`. A new-only export moves
-/// the mark to `now`, so the next one starts where this one stopped.
+/// Write the messages `filter` selects to `out`. A new-only export with no
+/// other filter moves the mark to `now`, so the next one starts where this
+/// one stopped; a narrower one leaves the mark alone.
 fn export(
     conn: &Connection,
     out: &mut impl std::io::Write,
@@ -757,7 +749,7 @@ fn export(
     let since = last_export(conn).map_err(|err| err.to_string())?;
     let count = crate::message_export::write_csv(conn, out, filter, since, now)
         .map_err(|err| format!("export failed: {err}"))?;
-    if filter.new_only {
+    if filter.new_only && !filter.narrows() {
         conn.execute(
             "INSERT INTO meta (key, value) VALUES (?1, ?2)
              ON CONFLICT(key) DO UPDATE SET value = excluded.value",
@@ -907,9 +899,9 @@ fn import(conn: &Connection, rows: &[crate::message_import::ImportRow], now: i64
 /// Store rows read from an import file.
 pub fn import_rows(app: &AppHandle, rows: &[crate::message_import::ImportRow]) -> Result<ImportSummary, String> {
     with_store(app, |store| {
-        let summary = import(&store.conn, rows, now_ms()).map_err(|err| format!("import failed: {err}"))?;
-        store.recent = RecentPackets::default();
-        Ok(summary)
+        // Importing only adds rows, so the duplicate check's memory of live
+        // packets stays valid.
+        import(&store.conn, rows, now_ms()).map_err(|err| format!("import failed: {err}"))
     })
 }
 
@@ -1200,6 +1192,27 @@ mod tests {
     }
 
     #[test]
+    fn a_failed_migration_step_leaves_the_old_version_intact() {
+        let conn = Connection::open_in_memory().unwrap();
+        for sql in [SCHEMA, SCHEMA_SENT, SCHEMA_SEARCH_SENT] {
+            conn.execute_batch(sql).unwrap();
+        }
+        conn.pragma_update(None, "user_version", 3).unwrap();
+        // Step 4 adds sent.stored_at, then fails creating a table that exists.
+        conn.execute_batch("CREATE TABLE meta (x)").unwrap();
+        assert!(migrate(&conn).is_err());
+        let version: i64 = conn.pragma_query_value(None, "user_version", |row| row.get(0)).unwrap();
+        assert_eq!(version, 3);
+        assert!(conn.prepare("SELECT stored_at FROM sent").is_err());
+
+        // With the obstacle gone, the step runs cleanly on the next launch.
+        conn.execute_batch("DROP TABLE meta").unwrap();
+        migrate(&conn).unwrap();
+        let version: i64 = conn.pragma_query_value(None, "user_version", |row| row.get(0)).unwrap();
+        assert_eq!(version, 5);
+    }
+
+    #[test]
     fn version_1_database_gains_the_sent_table() {
         let conn = Connection::open_in_memory().unwrap();
         conn.execute_batch(SCHEMA).unwrap();
@@ -1331,6 +1344,21 @@ mod tests {
         // A full export leaves the mark alone.
         assert_eq!(export_count(&conn, &ExportFilter::default(), 6_000), 3);
         assert_eq!(last_export(&conn).unwrap(), Some(5_000));
+    }
+
+    #[test]
+    fn a_narrowed_new_only_export_leaves_the_mark_alone() {
+        use crate::message_export::ExportFilter;
+        let conn = memory_db();
+        record(&conn, &message("N6TEST-7", Some("AD6DM-15"), "heard", "msg"), 1_000).unwrap();
+        upsert_sent(&conn, &sent("s-1", "K6TEST-9", "acked", 1), 1_500).unwrap();
+        let sent_only = ExportFilter { new_only: true, direction: "sent".to_string(), ..Default::default() };
+        assert_eq!(export_count(&conn, &sent_only, 2_000), 1);
+        assert_eq!(last_export(&conn).unwrap(), None);
+        // The received message it skipped still reaches the next new-only export.
+        let new_only = ExportFilter { new_only: true, ..Default::default() };
+        assert_eq!(export_count(&conn, &new_only, 3_000), 2);
+        assert_eq!(last_export(&conn).unwrap(), Some(3_000));
     }
 
     fn export_text(conn: &Connection) -> String {

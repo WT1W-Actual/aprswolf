@@ -125,7 +125,7 @@ function ReceivedWindow() {
           document.documentElement.style.setProperty("--msg-font-size", `${settings.msg_font_size}px`);
         }
       } catch {
-        // Browser preview — use defaults
+        // Browser preview - use defaults
       }
       if (!mounted) return;
     })();
@@ -140,6 +140,12 @@ function ReceivedWindow() {
     let active = true;
     let unlisten: (() => void) | undefined;
     const load = async (replace: boolean) => {
+      // Imported messages can fall inside pages already loaded, and the next
+      // page starts below the oldest one shown, so start paging over.
+      if (replace) {
+        setOlderItems([]);
+        setOlderSent([]);
+      }
       try {
         const msgs = await invoke<ReceivedItem[]>("load_received_messages");
         if (!active) return;
@@ -204,7 +210,7 @@ function ReceivedWindow() {
             document.documentElement.style.setProperty("--msg-font-size", `${settings.msg_font_size}px`);
           }
         });
-        // Unmounted while listen() was in flight — don't leak the listener.
+        // Unmounted while listen() was in flight - don't leak the listener.
         if (!active) {
           registered();
           return;
