@@ -1205,8 +1205,13 @@ button.secondary:hover:not(:disabled) {
 }
 
 :root[data-theme="dark"] body,
-:root[data-theme="dark"] .app {
+:root[data-theme="dark"] .app,
+:root[data-theme="dark"] .preferences-window {
   background: #15181d;
+}
+
+:root[data-theme="dark"] .preferences-window {
+  color: #e4e6eb;
 }
 
 :root[data-theme="dark"] .panel,
