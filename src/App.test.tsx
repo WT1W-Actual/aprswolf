@@ -169,18 +169,18 @@ describe("App", () => {
       "title",
       expect.stringMatching(/mutually exclusive/i),
     );
-    const expectedVersion = String(packageJson.displayVersion ?? packageJson.version);
+    const expectedVersion = packageJson.version;
     expect(screen.getByLabelText(new RegExp(`application version v${expectedVersion}`, "i"))).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Send" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "Connect TNC" })).toBeEnabled();
   });
 
-  it("formats stable runtime versions using the display label style", async () => {
+  it("shows the full runtime version in the badge", async () => {
     getVersionMock.mockResolvedValue("1.0.0");
 
     render(<App />);
 
-    expect(await screen.findByLabelText(/application version v1\.0/i)).toBeInTheDocument();
+    expect(await screen.findByLabelText(/application version v1\.0\.0/i)).toBeInTheDocument();
   });
 
   it("shows APRS-IS filter and path guidance", async () => {
