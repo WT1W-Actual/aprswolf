@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { publishUiLog } from "../logBus";
 import { nextId } from "./helpers";
-import { type ReceivedItem } from "../receivedBus";
+import { type ReceivedItem, type SentItem } from "../receivedBus";
 
 // Rows per page from the message history; matches the backend's PAGE_SIZE.
 export const PAGE_SIZE = 200;
@@ -106,3 +106,31 @@ export function useMessageSearch<T extends HistoryItem = ReceivedItem>(
   return { results, hasMore, loadMore };
 }
 
+export type TimelineEntry =
+  | { direction: "received"; item: ReceivedItem }
+  | { direction: "sent"; item: SentItem };
+
+/**
+ * Received and sent messages in one list, newest first. Each side is loaded
+ * a page at a time, so while a side has older messages still unloaded the
+ * list stops at that side's oldest loaded message: anything older from the
+ * other side would otherwise appear before messages that belong ahead of it.
+ */
+export function mergeTimeline(
+  received: ReceivedItem[],
+  sent: SentItem[],
+  more: { received: boolean; sent: boolean },
+): TimelineEntry[] {
+  const oldest = (items: { timestamp: number }[]) =>
+    items.reduce((min, item) => Math.min(min, item.timestamp), Infinity);
+  let cutoff = -Infinity;
+  if (more.received && received.length > 0) cutoff = Math.max(cutoff, oldest(received));
+  if (more.sent && sent.length > 0) cutoff = Math.max(cutoff, oldest(sent));
+  const entries: TimelineEntry[] = [
+    ...received.map((item) => ({ direction: "received" as const, item })),
+    ...sent.map((item) => ({ direction: "sent" as const, item })),
+  ];
+  return entries
+    .filter((entry) => entry.item.timestamp >= cutoff)
+    .sort((a, b) => b.item.timestamp - a.item.timestamp);
+}

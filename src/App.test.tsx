@@ -1065,6 +1065,52 @@ describe("App", () => {
     expect(screen.queryByRole("button", { name: "Load older messages" })).not.toBeInTheDocument();
   });
 
+  it("lists sent and received together in the pop-out Messages window", async () => {
+    const now = Date.now();
+    invokeMock.mockImplementation((cmd: string, payload?: any) => {
+      if (cmd === "load_settings") return Promise.resolve({ source: "WT1W-15", show_ack_messages: false, theme_mode: "system" });
+      if (cmd === "load_received_messages") {
+        return Promise.resolve([
+          { uuid: "r-2", seq: 2, timestamp: now - 1_000, from: "N6TEST-7", to: "WT1W-15", body: "Copy, see you there", aprsType: "msg" },
+          { uuid: "r-1", seq: 1, timestamp: now - 3_000, from: "WX6TEST", body: "_10111213c220s004g010t060", aprsType: "wx" },
+        ]);
+      }
+      if (cmd === "load_sent_messages") {
+        return Promise.resolve([
+          { uuid: "s-1", seq: 1, timestamp: now - 2_000, destination: "N6TEST-7", body: "On the net tonight?", status: "acked" },
+        ]);
+      }
+      if (cmd === "search_received_messages" && payload?.query === "net") return Promise.resolve([]);
+      if (cmd === "search_sent_messages" && payload?.query === "net") {
+        return Promise.resolve([
+          { uuid: "s-1", seq: 1, timestamp: now - 2_000, destination: "N6TEST-7", body: "On the net tonight?", status: "acked" },
+        ]);
+      }
+      return Promise.resolve(undefined);
+    });
+
+    const { container } = render(<ReceivedWindow />);
+
+    expect(await screen.findByText("On the net tonight?")).toBeInTheDocument();
+    expect(screen.getByText("Messages", { selector: ".received-window-title" })).toBeInTheDocument();
+    const bodies = () => Array.from(container.querySelectorAll(".received-window-list .msg-body")).map((el) => el.textContent);
+    await waitFor(() => {
+      expect(bodies()).toEqual(["Copy, see you there", "On the net tonight?", "_10111213c220s004g010t060"]);
+    });
+    const sentRow = screen.getByText("On the net tonight?").closest(".msg-item") as HTMLElement;
+    expect(within(sentRow).getByText("acked")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /^Weather/ }));
+    expect(bodies()).toEqual(["_10111213c220s004g010t060"]);
+
+    fireEvent.click(screen.getByRole("button", { name: /^All/ }));
+    fireEvent.change(screen.getByLabelText("Search message history"), { target: { value: "net" } });
+    await waitFor(() => {
+      expect(bodies()).toEqual(["On the net tonight?"]);
+    });
+    expect(invokeMock).toHaveBeenCalledWith("search_sent_messages", { query: "net" });
+  });
+
   it("opens a reply dialog from the popped-out received messages window and sends a reply", async () => {
     invokeMock.mockImplementation((cmd: string) => {
       if (cmd === "load_settings") {

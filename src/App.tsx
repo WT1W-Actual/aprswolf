@@ -21,6 +21,7 @@ import { type AppSettingsPayload, type ReceivedFilter, type ThemeMode, FILTER_OP
 import {
   isReceivedWindowOpen,
   publishReceivedSnapshot,
+  publishSentSnapshot,
   type SentItem,
   subscribePopoutFocus,
   subscribeReceivedWindowState,
@@ -381,6 +382,10 @@ function App() {
   useEffect(() => {
     publishReceivedSnapshot(receivedItems);
   }, [receivedItems]);
+
+  useEffect(() => {
+    publishSentSnapshot(sentItems);
+  }, [sentItems]);
 
   const unreadToMe = useToMeUnread(receivedItems, source, promiscuousBaseCallsign);
 
@@ -895,7 +900,7 @@ function App() {
       }
       const win = new WebviewWindow("received-messages", {
         url: "/#received",
-        title: "APRSWolf — Received Messages",
+        title: "APRSWolf — Messages",
         width: 680,
         height: 560,
         minWidth: 460,

@@ -1924,6 +1924,17 @@ form.preferences-window-body .preferences-grid-four {
   border-color: rgba(34, 111, 90, 0.35);
 }
 
+/* Sent messages in the pop-out take the main window's Sent pane colors. */
+.received-window-msg-item.sent-item {
+  background: rgba(111, 62, 160, 0.05);
+  border-color: rgba(111, 62, 160, 0.14);
+}
+
+:root[data-theme="dark"] .received-window-msg-item.sent-item {
+  background: rgba(111, 62, 160, 0.18);
+  border-color: rgba(111, 62, 160, 0.35);
+}
+
 :root[data-theme="dark"] .msg-popout-disabled {
   background: rgba(46, 55, 69, 0.44);
   border-color: rgba(132, 145, 165, 0.3);

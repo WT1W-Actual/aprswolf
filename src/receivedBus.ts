@@ -46,6 +46,10 @@ type ReceivedSyncEvent =
       items: ReceivedItem[];
     }
   | {
+      type: "sent-snapshot";
+      items: SentItem[];
+    }
+  | {
       type: "window-state";
       open: boolean;
     }
@@ -106,6 +110,20 @@ export function publishReceivedSnapshot(items: ReceivedItem[]): void {
 export function subscribeReceivedSnapshots(listener: (items: ReceivedItem[]) => void): () => void {
   return subscribe((payload) => {
     if (payload.type === "snapshot") {
+      listener(payload.items);
+    }
+  });
+}
+
+// The main window owns the sent list and its delivery status; the pop-out
+// shows it beside received messages.
+export function publishSentSnapshot(items: SentItem[]): void {
+  postEvent({ type: "sent-snapshot", items });
+}
+
+export function subscribeSentSnapshots(listener: (items: SentItem[]) => void): () => void {
+  return subscribe((payload) => {
+    if (payload.type === "sent-snapshot") {
       listener(payload.items);
     }
   });
