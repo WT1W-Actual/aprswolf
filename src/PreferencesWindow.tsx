@@ -25,8 +25,8 @@ const EMPTY_SETTINGS: AppSettingsPayload = {
   web_server_port: "18420",
   web_server_auto_start: false,
   web_server_token: "",
-  auto_beacon_on_connect: true,
-  auto_beacon_interval_secs: 1500,
+  auto_beacon_on_connect: false,
+  auto_beacon_interval_secs: 0,
   show_ack_messages: false,
   play_message_sound: true,
   promiscuous_base_callsign: false,
@@ -399,7 +399,7 @@ function PreferencesWindow() {
             <label className="inline-toggle">
               <input
                 type="checkbox"
-                checked={settings.auto_beacon_on_connect ?? true}
+                checked={settings.auto_beacon_on_connect ?? false}
                 onChange={(event) => updateSetting("auto_beacon_on_connect", event.currentTarget.checked)}
               />
               Beacon on connect
@@ -407,7 +407,7 @@ function PreferencesWindow() {
             <label className="inline-toggle">
               Auto-beacon every
               <select
-                value={settings.auto_beacon_interval_secs ?? 1500}
+                value={settings.auto_beacon_interval_secs ?? 0}
                 onChange={(event) => updateSetting("auto_beacon_interval_secs", Number(event.currentTarget.value))}
                 className="input-interval"
               >

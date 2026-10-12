@@ -98,8 +98,8 @@ function App() {
   const [receivedItems, setReceivedItems] = useState<ReceivedItem[]>([]);
   const [activeReceivedFilters, setActiveReceivedFilters] = useState<ReceivedFilter[]>(["all"]);
   const [showAckMessages, setShowAckMessages] = useState(false);
-  const [autoBeaconIntervalSecs, setAutoBeaconIntervalSecs] = useState(1500);
-  const [autoBeaconOnConnect, setAutoBeaconOnConnect] = useState(true);
+  const [autoBeaconIntervalSecs, setAutoBeaconIntervalSecs] = useState(0);
+  const [autoBeaconOnConnect, setAutoBeaconOnConnect] = useState(false);
   const [playMessageSound, setPlayMessageSound] = useState(true);
   const [promiscuousBaseCallsign, setPromiscuousBaseCallsign] = useState(false);
   const [themeMode, setThemeMode] = useState<ThemeMode>("system");
@@ -154,8 +154,8 @@ function App() {
     setWebServerPort(s.web_server_port ?? "");
     setWebServerAutoStart(Boolean(s.web_server_auto_start));
     setShowAckMessages(Boolean(s.show_ack_messages));
-    setAutoBeaconIntervalSecs(typeof s.auto_beacon_interval_secs === "number" ? s.auto_beacon_interval_secs : 1500);
-    setAutoBeaconOnConnect(s.auto_beacon_on_connect ?? true);
+    setAutoBeaconIntervalSecs(typeof s.auto_beacon_interval_secs === "number" ? s.auto_beacon_interval_secs : 0);
+    setAutoBeaconOnConnect(s.auto_beacon_on_connect ?? false);
     setPlayMessageSound(s.play_message_sound ?? true);
     setPromiscuousBaseCallsign(Boolean(s.promiscuous_base_callsign));
     if (s.theme_mode === "light" || s.theme_mode === "dark" || s.theme_mode === "system") {
