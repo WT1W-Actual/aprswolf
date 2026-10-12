@@ -68,14 +68,8 @@ jobs:
           LABEL: ${{ matrix.label }}
         run: |
           DMG=$(ls -t "src-tauri/target/$TARGET/release/bundle/dmg"/*.dmg | head -1)
-          DISPLAY_VERSION=$(node -e '
-            const p = require("./package.json");
-            const v = p.displayVersion || p.version;
-            const m = String(v).match(/^(\d+)\.(\d+)\.(\d+)$/);
-            if (m) process.stdout.write(`${Number(m[1])}.${Number(m[2])}`);
-            else process.stdout.write(String(v).replace(/\b\d+\b/g, (s) => String(Number(s))));
-          ')
-          FINAL="APRSWolf_${DISPLAY_VERSION}_${LABEL}.dmg"
+          APP_VERSION=$(node -p 'require("./package.json").version')
+          FINAL="APRSWolf_${APP_VERSION}_${LABEL}.dmg"
           mkdir -p dist-macos
           cp "$DMG" "dist-macos/$FINAL"
           echo "Origin: $DMG"
@@ -150,20 +144,14 @@ jobs:
           LABEL: ${{ matrix.label }}
         run: |
           BUNDLE_DIR="src-tauri/target/$TAURI_TARGET/release/bundle"
-          DISPLAY_VERSION=$(node -e '
-            const p = require("./package.json");
-            const v = p.displayVersion || p.version;
-            const m = String(v).match(/^(\d+)\.(\d+)\.(\d+)$/);
-            if (m) process.stdout.write(`${Number(m[1])}.${Number(m[2])}`);
-            else process.stdout.write(String(v).replace(/\b\d+\b/g, (s) => String(Number(s))));
-          ')
+          APP_VERSION=$(node -p 'require("./package.json").version')
           mkdir -p dist-linux
           DEB=$(ls -t "$BUNDLE_DIR/deb"/*.deb 2>/dev/null | head -1 || true)
           RPM=$(ls -t "$BUNDLE_DIR/rpm"/*.rpm 2>/dev/null | head -1 || true)
           APPIMAGE=$(ls -t "$BUNDLE_DIR/appimage"/*.AppImage 2>/dev/null | head -1 || true)
-          [[ -n "$DEB" ]] && cp "$DEB" "dist-linux/APRSWolf_${DISPLAY_VERSION}_${LABEL}.deb"
-          [[ -n "$RPM" ]] && cp "$RPM" "dist-linux/APRSWolf-${DISPLAY_VERSION}-1.${LABEL}.rpm"
-          [[ -n "$APPIMAGE" ]] && cp "$APPIMAGE" "dist-linux/APRSWolf_${DISPLAY_VERSION}_${LABEL}.AppImage"
+          [[ -n "$DEB" ]] && cp "$DEB" "dist-linux/APRSWolf_${APP_VERSION}_${LABEL}.deb"
+          [[ -n "$RPM" ]] && cp "$RPM" "dist-linux/APRSWolf-${APP_VERSION}-1.${LABEL}.rpm"
+          [[ -n "$APPIMAGE" ]] && cp "$APPIMAGE" "dist-linux/APRSWolf_${APP_VERSION}_${LABEL}.AppImage"
           ls -1 dist-linux
 
       - uses: actions/upload-artifact@v7
@@ -200,18 +188,12 @@ jobs:
         shell: bash
         run: |
           BUNDLE_DIR="src-tauri/target/x86_64-pc-windows-msvc/release/bundle"
-          DISPLAY_VERSION=$(node -e '
-            const p = require("./package.json");
-            const v = p.displayVersion || p.version;
-            const m = String(v).match(/^(\d+)\.(\d+)\.(\d+)$/);
-            if (m) process.stdout.write(`${Number(m[1])}.${Number(m[2])}`);
-            else process.stdout.write(String(v).replace(/\b\d+\b/g, (s) => String(Number(s))));
-          ')
+          APP_VERSION=$(node -p 'require("./package.json").version')
           mkdir -p dist-windows
           MSI=$(ls -t "$BUNDLE_DIR/msi"/*.msi 2>/dev/null | head -1 || true)
           EXE=$(ls -t "$BUNDLE_DIR/nsis"/*.exe 2>/dev/null | head -1 || true)
-          [[ -n "$MSI" ]] && cp "$MSI" "dist-windows/APRSWolf_${DISPLAY_VERSION}_x64.msi"
-          [[ -n "$EXE" ]] && cp "$EXE" "dist-windows/APRSWolf_${DISPLAY_VERSION}_x64-setup.exe"
+          [[ -n "$MSI" ]] && cp "$MSI" "dist-windows/APRSWolf_${APP_VERSION}_x64.msi"
+          [[ -n "$EXE" ]] && cp "$EXE" "dist-windows/APRSWolf_${APP_VERSION}_x64-setup.exe"
           ls -1 dist-windows
 
       - uses: actions/upload-artifact@v7

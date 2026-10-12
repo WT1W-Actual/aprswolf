@@ -122,16 +122,8 @@ BUNDLE_DIR="src-tauri/target/${TARGET}/release/bundle"
 OUT_DIR="$PROJECT_ROOT/dist-linux"
 mkdir -p "$OUT_DIR"
 
-# Tauri names packages like APRSWolf_1.0.0_amd64.deb . Mirror the macOS
-# display-version naming: 1.0.0 -> 1.0 (keeps the .0), so the .deb is
-# APRSWolf_1.0_amd64.deb.
-DISPLAY_PKG_VERSION=$(node -e '
-const p = require("./package.json");
-const v = p.displayVersion || p.version;
-const m = String(v).match(/^(\d+)\.(\d+)\.(\d+)$/);
-if (m) process.stdout.write(`${Number(m[1])}.${Number(m[2])}`);
-else process.stdout.write(String(v).replace(/\b\d+\b/g, (s) => String(Number(s))));
-')
+# Artifacts carry the full package.json version, e.g. APRSWolf_1.0.3_amd64.deb.
+PKG_VERSION=$(node -p 'require("./package.json").version')
 
 ARCH="${TARGET%%-*}"
 case "$ARCH" in
@@ -155,15 +147,15 @@ echo "── Collecting bundles into dist-linux/ ──"
 
 # .deb
 DEB=$(ls -t "$BUNDLE_DIR/deb"/*.deb 2>/dev/null | head -1 || true)
-copy_bundle "$DEB" "APRSWolf_${DISPLAY_PKG_VERSION}_${PKG_ARCH}.deb" || true
+copy_bundle "$DEB" "APRSWolf_${PKG_VERSION}_${PKG_ARCH}.deb" || true
 
 # .rpm
 RPM=$(ls -t "$BUNDLE_DIR/rpm"/*.rpm 2>/dev/null | head -1 || true)
-copy_bundle "$RPM" "APRSWolf-${DISPLAY_PKG_VERSION}-1.${PKG_ARCH}.rpm" || true
+copy_bundle "$RPM" "APRSWolf-${PKG_VERSION}-1.${PKG_ARCH}.rpm" || true
 
 # .AppImage
 APPIMAGE=$(ls -t "$BUNDLE_DIR/appimage"/*.AppImage 2>/dev/null | head -1 || true)
-copy_bundle "$APPIMAGE" "APRSWolf_${DISPLAY_PKG_VERSION}_${PKG_ARCH}.AppImage" || true
+copy_bundle "$APPIMAGE" "APRSWolf_${PKG_VERSION}_${PKG_ARCH}.AppImage" || true
 
 echo ""
 echo "═══ Done ═══"

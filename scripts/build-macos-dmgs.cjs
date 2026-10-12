@@ -8,21 +8,7 @@ const path = require("path");
 
 const projectRoot = path.resolve(__dirname, "..");
 const packageJson = JSON.parse(fs.readFileSync(path.join(projectRoot, "package.json"), "utf8"));
-function normalizeReleaseVersion(version) {
-  if (typeof version !== "string" || version.length === 0) {
-    return "0.0.0";
-  }
-
-  const semverMatch = version.match(/^(\d+)\.(\d+)\.(\d+)$/);
-  if (semverMatch) {
-    const [, major, minor, patch] = semverMatch;
-    return patch === "0" ? `${Number(major)}.${Number(minor)}` : `${Number(major)}.${Number(minor)}.${Number(patch)}`;
-  }
-
-  return version.replace(/\b\d+\b/g, (segment) => String(Number(segment)));
-}
-
-const appVersion = normalizeReleaseVersion(packageJson.displayVersion || packageJson.version);
+const appVersion = packageJson.version;
 const bundleVersion = packageJson.version;
 const targets = [
   {

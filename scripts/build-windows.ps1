@@ -61,7 +61,7 @@ $BundleDir = "src-tauri\target\$Target\release\bundle"
 $OutDir = Join-Path $ProjectRoot "dist-windows"
 New-Item -ItemType Directory -Force -Path $OutDir | Out-Null
 
-$DisplayVersion = (node -e "const p=require('./package.json');process.stdout.write(p.displayVersion||p.version);")
+$AppVersion = (node -p "require('./package.json').version")
 
 Write-Host "-- Collecting bundles into dist-windows/ --"
 
@@ -76,7 +76,7 @@ foreach ($key in $Patterns.Keys) {
     if ($files) {
         $src = $files[0]
         $ext = $src.Extension
-        $finalName = "APRSWolf_${DisplayVersion}_x64$ext"
+        $finalName = "APRSWolf_${AppVersion}_x64$ext"
         $dest = Join-Path $OutDir $finalName
         Copy-Item -Force $src.FullName $dest
         Write-Host "  -> $dest"
