@@ -1,6 +1,7 @@
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import { openUrl } from "@tauri-apps/plugin-opener";
 import "./App.css";
 import aprsWolfLogo from "./assets/APRSWolf.png";
 import { publishUiLog, subscribeUiLog, type LogKind, type UiLogPayload } from "./logBus";
@@ -927,8 +928,18 @@ function App() {
     }
   }
 
-  function openRemoteWebUi() {
+  async function openRemoteWebUi() {
     if (!webServerUrl) return;
+    // The desktop webview ignores window.open with _blank, so hand the URL
+    // to the system browser instead. Browser preview keeps window.open.
+    if (isTauriRuntime) {
+      try {
+        await openUrl(webServerUrl);
+      } catch (error) {
+        pushLog("error", `open remote UI failed: ${String(error)}`);
+      }
+      return;
+    }
     window.open(webServerUrl, "_blank", "noopener,noreferrer");
   }
 
