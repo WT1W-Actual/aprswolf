@@ -12,21 +12,21 @@ import { type AppSettingsPayload } from "./lib/types";
 
 const EMPTY_SETTINGS: AppSettingsPayload = {
   source: "",
-  path: "",
-  host: "",
-  port: "",
-  aprsis_host: "",
-  aprsis_port: "",
+  path: "WIDE1-1,WIDE2-1",
+  host: "127.0.0.1",
+  port: "8001",
+  aprsis_host: "rotate.aprs2.net",
+  aprsis_port: "14580",
   aprsis_passcode: "",
   aprsis_filter: "",
   beacon_lat: "",
   beacon_lon: "",
-  beacon_symbol: "",
-  web_server_port: "",
+  beacon_symbol: "/-",
+  web_server_port: "18420",
   web_server_auto_start: false,
   web_server_token: "",
-  auto_beacon_on_connect: true,
-  auto_beacon_interval_secs: 1500,
+  auto_beacon_on_connect: false,
+  auto_beacon_interval_secs: 0,
   show_ack_messages: false,
   play_message_sound: true,
   promiscuous_base_callsign: false,
@@ -233,6 +233,7 @@ function PreferencesWindow() {
                 placeholder="W1AW-9"
                 className="input-call"
               />
+              <span className="field-hint">Your callsign with SSID, e.g. W1AW-9</span>
             </label>
             <label>
               Digi Path
@@ -344,6 +345,7 @@ function PreferencesWindow() {
                 autoComplete="off"
                 className="input-pass"
               />
+              <span className="field-hint">APRS-IS passcode; -1 for receive-only</span>
             </label>
             <label>
               Filter
@@ -370,6 +372,7 @@ function PreferencesWindow() {
                 placeholder="37.7583"
                 className="input-coord"
               />
+              <span className="field-hint">Decimal degrees, e.g. 37.7583</span>
             </label>
             <label>
               Longitude
@@ -379,6 +382,7 @@ function PreferencesWindow() {
                 placeholder="-122.3908"
                 className="input-coord"
               />
+              <span className="field-hint">Decimal degrees, e.g. -122.3908</span>
             </label>
             <label>
               Symbol
@@ -395,7 +399,7 @@ function PreferencesWindow() {
             <label className="inline-toggle">
               <input
                 type="checkbox"
-                checked={settings.auto_beacon_on_connect ?? true}
+                checked={settings.auto_beacon_on_connect ?? false}
                 onChange={(event) => updateSetting("auto_beacon_on_connect", event.currentTarget.checked)}
               />
               Beacon on connect
@@ -403,7 +407,7 @@ function PreferencesWindow() {
             <label className="inline-toggle">
               Auto-beacon every
               <select
-                value={settings.auto_beacon_interval_secs ?? 1500}
+                value={settings.auto_beacon_interval_secs ?? 0}
                 onChange={(event) => updateSetting("auto_beacon_interval_secs", Number(event.currentTarget.value))}
                 className="input-interval"
               >
@@ -441,6 +445,7 @@ function PreferencesWindow() {
                 placeholder="Empty = localhost only"
                 autoComplete="off"
               />
+              <span className="field-hint">Leave empty to allow this Mac only</span>
             </label>
             <label className="inline-toggle preferences-inline-toggle">
               <input

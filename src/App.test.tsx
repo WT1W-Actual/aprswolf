@@ -11,6 +11,7 @@ import packageJson from "../package.json";
 const invokeMock = vi.fn() as any;
 const listenMock = vi.fn() as any;
 const getVersionMock = vi.fn() as any;
+const openUrlMock = vi.fn() as any;
 
 let localStorageStore: Record<string, string> = {};
 
@@ -44,6 +45,10 @@ vi.mock("@tauri-apps/api/event", () => ({
 
 vi.mock("@tauri-apps/api/app", () => ({
   getVersion: () => getVersionMock(),
+}));
+
+vi.mock("@tauri-apps/plugin-opener", () => ({
+  openUrl: (url: string) => openUrlMock(url),
 }));
 
 vi.mock("@tauri-apps/api/window", () => ({
@@ -877,6 +882,32 @@ describe("App", () => {
     expect(screen.getByRole("button", { name: "Connect APRS-IS" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "Disable Remote" })).toBeEnabled();
   });
+
+  it("opens the remote UI in the system browser", async () => {
+    openUrlMock.mockReset();
+    openUrlMock.mockResolvedValue(undefined);
+    const windowOpenSpy = vi.spyOn(window, "open").mockImplementation(() => null);
+    invokeMock.mockImplementation((cmd: string) => {
+      if (cmd === "load_received_messages") {
+        return Promise.resolve([]);
+      }
+      if (cmd === "get_web_server_status") {
+        return Promise.resolve({ enabled: true, port: 18420, url: "http://127.0.0.1:18420" });
+      }
+      if (cmd === "get_manual_beacon_cooldown_remaining") {
+        return Promise.resolve(0);
+      }
+      return Promise.resolve(undefined);
+    });
+
+    render(<App />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Open Remote UI" }));
+
+    await waitFor(() => expect(openUrlMock).toHaveBeenCalledWith("http://127.0.0.1:18420"));
+    expect(windowOpenSpy).not.toHaveBeenCalledWith("http://127.0.0.1:18420", "_blank", expect.anything());
+    windowOpenSpy.mockRestore();
+  });
 });
 
 describe("PreferencesWindow", () => {
@@ -910,6 +941,8 @@ describe("PreferencesWindow", () => {
 
     fireEvent.change(callsignInput, { target: { value: "ab1cde-7" } });
     expect(callsignInput.value).toBe("AB1CDE-7");
+    // The guidance stays on screen once the field has text.
+    expect(screen.getByText("Your callsign with SSID, e.g. W1AW-9")).toBeInTheDocument();
 
     const pathInput = screen.getByPlaceholderText("WIDE1-1,WIDE2-1") as HTMLInputElement;
     fireEvent.change(pathInput, { target: { value: "wide1-1,wide2-2" } });

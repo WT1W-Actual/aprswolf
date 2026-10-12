@@ -68,27 +68,50 @@ impl Default for AppSettings {
     fn default() -> Self {
         Self {
             source: String::new(),
-            path: String::new(),
-            host: String::new(),
-            port: String::new(),
+            path: "WIDE1-1,WIDE2-1".to_string(),
+            host: "127.0.0.1".to_string(),
+            port: "8001".to_string(),
             agw_port: String::new(),
-            aprsis_host: String::new(),
-            aprsis_port: String::new(),
+            aprsis_host: "rotate.aprs2.net".to_string(),
+            aprsis_port: "14580".to_string(),
             aprsis_passcode: String::new(),
             aprsis_filter: String::new(),
             beacon_lat: String::new(),
             beacon_lon: String::new(),
-            beacon_symbol: String::new(),
-            web_server_port: String::new(),
+            beacon_symbol: "/-".to_string(),
+            web_server_port: "18420".to_string(),
             web_server_auto_start: false,
             web_server_token: String::new(),
-            auto_beacon_on_connect: true,
-            auto_beacon_interval_secs: 1500,
+            auto_beacon_on_connect: false,
+            auto_beacon_interval_secs: 0,
             show_ack_messages: false,
             play_message_sound: true,
             promiscuous_base_callsign: false,
             theme_mode: "system".to_string(),
             msg_font_size: 15,
+        }
+    }
+}
+
+impl AppSettings {
+    /// Fields with a standard value get it back whenever they are blank, so
+    /// Preferences shows a working value instead of an empty box. Personal
+    /// fields (callsign, passcode, position, token) have no such value and
+    /// stay as the user left them.
+    fn fill_blank_defaults(&mut self) {
+        let defaults = AppSettings::default();
+        for (field, default) in [
+            (&mut self.path, defaults.path),
+            (&mut self.host, defaults.host),
+            (&mut self.port, defaults.port),
+            (&mut self.aprsis_host, defaults.aprsis_host),
+            (&mut self.aprsis_port, defaults.aprsis_port),
+            (&mut self.beacon_symbol, defaults.beacon_symbol),
+            (&mut self.web_server_port, defaults.web_server_port),
+        ] {
+            if field.trim().is_empty() {
+                *field = default;
+            }
         }
     }
 }
@@ -403,7 +426,9 @@ fn load_settings_from_disk(app: &AppHandle) -> AppSettings {
         Err(_) => return AppSettings::default(),
     };
 
-    serde_json::from_str::<AppSettings>(&raw).unwrap_or_default()
+    let mut settings = serde_json::from_str::<AppSettings>(&raw).unwrap_or_default();
+    settings.fill_blank_defaults();
+    settings
 }
 
 /// Save settings with merge semantics: the payload may be a partial object;
@@ -423,8 +448,9 @@ pub fn save_settings(app: AppHandle, settings: serde_json::Value) -> Result<(), 
         base.insert(key.clone(), value.clone());
     }
 
-    let merged_settings: AppSettings = serde_json::from_value(merged)
+    let mut merged_settings: AppSettings = serde_json::from_value(merged)
         .map_err(|err| format!("invalid settings payload: {err}"))?;
+    merged_settings.fill_blank_defaults();
 
     let path = settings_path(&app)?;
     let json = serde_json::to_string_pretty(&merged_settings)
@@ -549,7 +575,23 @@ fn schedule_received_flush(app: AppHandle) {
 
 #[cfg(test)]
 mod tests {
-    use super::{normalize_received_message, write_atomic};
+    use super::{normalize_received_message, write_atomic, AppSettings};
+
+    #[test]
+    fn fill_blank_defaults_restores_standard_values_and_keeps_personal_ones() {
+        let mut settings: AppSettings = serde_json::from_str(
+            r#"{"source":"AD6DM-15","path":"","host":" ","port":"8010","web_server_port":"","beacon_lat":""}"#,
+        )
+        .unwrap();
+        settings.fill_blank_defaults();
+        assert_eq!(settings.source, "AD6DM-15");
+        assert_eq!(settings.path, "WIDE1-1,WIDE2-1");
+        assert_eq!(settings.host, "127.0.0.1");
+        assert_eq!(settings.port, "8010");
+        assert_eq!(settings.web_server_port, "18420");
+        assert_eq!(settings.beacon_lat, "");
+        assert_eq!(settings.aprsis_passcode, "");
+    }
 
     #[test]
     fn write_atomic_replaces_the_file_and_leaves_no_temp_behind() {
