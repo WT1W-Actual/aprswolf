@@ -1,5 +1,5 @@
 /* ---------------------------------------------------------------
-   APRSWolf — Apple HIG–inspired stylesheet
+   APRSWolf - Apple HIG–inspired stylesheet
    Theme: macOS light, SF Pro system font, 8pt grid
 --------------------------------------------------------------- */
 
@@ -2106,4 +2106,129 @@ button.danger {
 
 :root[data-theme="dark"] .msg-popout-disabled-copy {
   color: #c4ccda;
+}
+
+/* ── About window ──────────────────────────────────────────── */
+.about-window {
+  height: 100vh;
+  box-sizing: border-box;
+  padding: 24px 28px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: 10px;
+  background: #ececec;
+  color: #1d1f23;
+  overflow-y: auto;
+}
+
+.about-logo {
+  width: 96px;
+  height: 96px;
+  border-radius: 22px;
+}
+
+.about-name {
+  margin: 0;
+  font-size: 24px;
+  font-weight: 700;
+  letter-spacing: -0.4px;
+}
+
+.about-version {
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: 12px;
+  color: #6b6f76;
+  margin-top: -6px;
+}
+
+.about-tagline {
+  margin: 6px 0 0;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.about-text {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.45;
+  color: #3a3d43;
+}
+
+.about-points {
+  margin: 2px 0 0;
+  padding: 0;
+  list-style: none;
+  font-size: 13px;
+  line-height: 1.6;
+  color: #3a3d43;
+}
+
+.about-platforms {
+  font-size: 12px;
+  color: #6b6f76;
+}
+
+.about-links {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: #6b6f76;
+}
+
+.about-links .link-button {
+  background: none;
+  border: none;
+  padding: 0;
+  font: inherit;
+  color: #2f6fed;
+  cursor: pointer;
+}
+
+.about-links .link-button:hover {
+  text-decoration: underline;
+}
+
+.about-credits {
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.about-credits-title {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.6px;
+  text-transform: uppercase;
+  color: #6b6f76;
+}
+
+.about-signoff {
+  margin-top: auto;
+  font-size: 12px;
+  color: #6b6f76;
+  font-style: italic;
+}
+
+:root[data-theme="dark"] .about-window {
+  background: #15181d;
+  color: #e4e6eb;
+}
+
+:root[data-theme="dark"] .about-text,
+:root[data-theme="dark"] .about-points {
+  color: #c4c8cf;
+}
+
+:root[data-theme="dark"] .about-version,
+:root[data-theme="dark"] .about-platforms,
+:root[data-theme="dark"] .about-links,
+:root[data-theme="dark"] .about-credits-title,
+:root[data-theme="dark"] .about-signoff {
+  color: #8e939b;
+}
+
+:root[data-theme="dark"] .about-links .link-button {
+  color: #6ea0ff;
 }

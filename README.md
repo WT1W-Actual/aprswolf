@@ -124,7 +124,7 @@ The [End User Guide](docs/END-USER-GUIDE.md) walks through the rest.
 - Opens a separate Messages window with sent and received in one timeline, and a Traffic Log window with every raw packet and event.
 - Derives the APRS-IS passcode from your callsign.
 - Serves a browser remote control page for your phone or another computer.
-- Includes a Help window with setup and troubleshooting topics, and native `Preferences...` and `Help > APRSWolf Help` menu items.
+- Includes a Help window with setup and troubleshooting topics, an About window with links to the project and release notes, and native `Preferences...` and `Help > APRSWolf Help` menu items.
 
 ## Using the Main Window
 

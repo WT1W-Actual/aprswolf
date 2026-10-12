@@ -11,7 +11,7 @@ mod tnc;
 mod webserver;
 
 use tauri::{
-    menu::{AboutMetadata, MenuBuilder, MenuItemBuilder, SubmenuBuilder},
+    menu::{MenuBuilder, MenuItemBuilder, SubmenuBuilder},
     AppHandle, Manager, WebviewUrl, WebviewWindowBuilder,
 };
 
@@ -172,6 +172,30 @@ fn import_messages(app: &AppHandle) {
         });
 }
 
+fn open_about_window(app: &AppHandle) -> tauri::Result<()> {
+    if let Some(window) = app.get_webview_window("about-window") {
+        focus_or_show(window);
+        return Ok(());
+    }
+
+    let window = WebviewWindowBuilder::new(app, "about-window", WebviewUrl::App("/#about".into()))
+        .title("About APRSWolf")
+        .inner_size(420.0, 600.0)
+        .resizable(false)
+        .minimizable(false)
+        .maximizable(false)
+        .build()?;
+
+    focus_or_show(window);
+    Ok(())
+}
+
+// Async for the same reason as open_preferences.
+#[tauri::command]
+async fn open_help(app: AppHandle) -> Result<(), String> {
+    open_help_window(&app).map_err(|e| e.to_string())
+}
+
 fn open_help_window(app: &AppHandle) -> tauri::Result<()> {
     if let Some(window) = app.get_webview_window("help-window") {
         focus_or_show(window);
@@ -227,11 +251,15 @@ pub fn run() {
                 .accelerator("CmdOrCtrl+Shift+E")
                 .build(handle)?;
 
+            let about = MenuItemBuilder::with_id("about", "About APRSWolf").build(handle)?;
+
             let app_menu = SubmenuBuilder::new(handle, "APRSWolf")
+                .item(&about)
+                .separator()
                 .item(&preferences)
                 .separator()
                 .services()
-                .about(Some(AboutMetadata::default()))
+                .separator()
                 .quit()
                 .build()?;
 
@@ -258,6 +286,9 @@ pub fn run() {
             if event.id().as_ref() == "preferences" {
                 let _ = open_preferences_window(app);
             }
+            if event.id().as_ref() == "about" {
+                let _ = open_about_window(app);
+            }
             if event.id().as_ref() == "help" {
                 let _ = open_help_window(app);
             }
@@ -274,6 +305,7 @@ pub fn run() {
         .plugin(tauri_plugin_fs::init())
         .invoke_handler(tauri::generate_handler![
             open_preferences,
+            open_help,
             tnc::connect_tnc,
             tnc::disconnect_tnc,
             tnc::send_message,

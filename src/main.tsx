@@ -1,5 +1,6 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
+import AboutWindow from "./AboutWindow";
 import App from "./App";
 import ExportWindow from "./ExportWindow";
 import HelpWindow from "./HelpWindow";
@@ -13,9 +14,10 @@ const isLogWindow = hash === "#log";
 const isPreferencesWindow = hash === "#preferences";
 const isReceivedWindow = hash === "#received";
 const isExportWindow = hash === "#export";
+const isAboutWindow = hash === "#about";
 
 ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
   <React.StrictMode>
-    {isHelpWindow ? <HelpWindow /> : isLogWindow ? <LogWindow /> : isPreferencesWindow ? <PreferencesWindow /> : isReceivedWindow ? <ReceivedWindow /> : isExportWindow ? <ExportWindow /> : <App />}
+    {isHelpWindow ? <HelpWindow /> : isLogWindow ? <LogWindow /> : isPreferencesWindow ? <PreferencesWindow /> : isReceivedWindow ? <ReceivedWindow /> : isExportWindow ? <ExportWindow /> : isAboutWindow ? <AboutWindow /> : <App />}
   </React.StrictMode>,
 );
