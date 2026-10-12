@@ -384,6 +384,41 @@ describe("App", () => {
     expect(screen.queryByText(/\{ET$/)).not.toBeInTheDocument();
   });
 
+  it("lists a packet heard twice once and marks the copy in the log", async () => {
+    render(<App />);
+
+    let messageHandler: ((event: unknown) => void) | undefined;
+    await waitFor(() => {
+      const messageCall = listenMock.mock.calls.find((call: any) => call[0] === "tnc_message");
+      expect(messageCall?.[1]).toBeTruthy();
+      messageHandler = messageCall?.[1] as (event: unknown) => void;
+    });
+
+    const packet = {
+      text: "N6TEST-7>APRS::WT1W-15  :Heard twice{12",
+      payload_hex: "AABB",
+      bytes: 40,
+      source: "N6TEST-7",
+      destination: "APRS",
+      path: [],
+      from: "N6TEST-7",
+      to: "WT1W-15",
+      body: "Heard twice",
+      aprsType: "msg",
+      isBulletin: false,
+      micEDecoded: false,
+      summary_source: "N6TEST-7",
+      summary_destination: "APRS",
+      uuid: "first-copy",
+      seq: 41,
+    };
+    messageHandler?.({ payload: packet });
+    messageHandler?.({ payload: { ...packet, path: ["TCPIP"], duplicate: true } });
+
+    expect(await screen.findByText(/RX 40B .*Heard twice \(duplicate\) \[AABB\]/)).toBeInTheDocument();
+    expect(screen.getAllByText("Heard twice")).toHaveLength(1);
+  });
+
   it("classifies telemetry metadata messages as telemetry", async () => {
     render(<App />);
 

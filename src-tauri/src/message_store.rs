@@ -10,11 +10,17 @@
 //! The windows never hold the whole history: they load one page of
 //! `PAGE_SIZE` rows at a time, newest first.
 //!
+//! A packet often arrives more than once: over RF and APRS-IS, or through
+//! more than one digipeater. Each received packet gets a fingerprint from
+//! its sender, addressee, body, and APRS message number, and a packet whose
+//! fingerprint was stored within `DUPLICATE_WINDOW_MS` is not stored again.
+//!
 //! Sent messages live in their own table, one row per message keyed by a
 //! UUID, with the delivery status (queued, sent, acked, failed, expired)
 //! updated as it changes. They are conversation, so retention never trims
 //! them.
 
+use std::collections::HashMap;
 use std::path::Path;
 use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -31,6 +37,10 @@ pub const PAGE_SIZE: usize = 200;
 /// Parts of a multi-part message arriving within this window are joined
 /// into one row, matching the main window's live merge.
 const MERGE_WINDOW_MS: i64 = 30_000;
+/// A copy of a packet heard again within this window is a duplicate. Thirty
+/// seconds matches the duplicate check in APRS-IS servers and digipeaters,
+/// so a sender's retry after it is stored as a new row.
+const DUPLICATE_WINDOW_MS: i64 = 30_000;
 const PRUNE_INTERVAL: Duration = Duration::from_secs(60 * 60);
 const DAY_MS: i64 = 24 * 60 * 60 * 1000;
 
@@ -72,6 +82,27 @@ END;
 struct Store {
     conn: Connection,
     last_prune: Option<Instant>,
+    recent: RecentPackets,
+}
+
+/// Fingerprints of packets stored within the duplicate window, each with the
+/// row it went into. Held in memory: the window is shorter than any restart.
+#[derive(Default)]
+struct RecentPackets {
+    seen: HashMap<String, (String, i64, i64)>,
+}
+
+impl RecentPackets {
+    /// The row a packet with this fingerprint went into, if it was stored
+    /// within the window.
+    fn find(&mut self, fingerprint: &str, now: i64) -> Option<(String, i64)> {
+        self.seen.retain(|_, (_, _, at)| now - *at < DUPLICATE_WINDOW_MS);
+        self.seen.get(fingerprint).map(|(uuid, seq, _)| (uuid.clone(), *seq))
+    }
+
+    fn remember(&mut self, fingerprint: String, uuid: &str, seq: i64, now: i64) {
+        self.seen.insert(fingerprint, (uuid.to_string(), seq, now));
+    }
 }
 
 fn store() -> &'static Mutex<Option<Store>> {
@@ -139,7 +170,7 @@ fn with_store<T>(app: &AppHandle, f: impl FnOnce(&mut Store) -> Result<T, String
         let conn = open_at(&dir.join(DB_FILE)).map_err(|err| format!("failed to open message database: {err}"))?;
         import_legacy_file(&conn, &dir.join(LEGACY_FILE), now_ms());
         let _ = expire_unfinished_sent(&conn, now_ms());
-        *guard = Some(Store { conn, last_prune: None });
+        *guard = Some(Store { conn, last_prune: None, recent: RecentPackets::default() });
     }
     f(guard.as_mut().expect("store opened above"))
 }
@@ -179,6 +210,29 @@ fn is_ack_or_reject(body: &str) -> bool {
 /// Conversation is kept forever; everything else is subject to retention.
 fn is_conversation(aprs_type: &str, is_bulletin: bool, body: &str) -> bool {
     (is_bulletin || aprs_type == "msg" || aprs_type == "qry") && !is_ack_or_reject(body)
+}
+
+/// The APRS message number (`{12`, or `{12}34` with a reply-ack) of a
+/// message packet, read from the raw info field since the stored body has
+/// it stripped.
+fn message_number(message: &Value) -> Option<&str> {
+    let raw = text_field(message, "protocol_info_text").or_else(|| text_field(message, "info_text"))?;
+    let info = crate::settings::unwrap_third_party_info(raw).unwrap_or(raw).trim();
+    let text = info.strip_prefix(':')?.get(10..)?;
+    let (_, id) = text.rsplit_once('{')?;
+    crate::tnc::split_reply_ack_id(id.trim()).map(|(number, _)| number)
+}
+
+/// Sender, addressee, body, and message number: what makes two copies of a
+/// packet the same packet, whatever path each took.
+fn fingerprint(message: &Value) -> String {
+    [
+        text_field(message, "from").unwrap_or("?"),
+        text_field(message, "to").unwrap_or(""),
+        text_field(message, "body").unwrap_or("").trim(),
+        message_number(message).unwrap_or(""),
+    ]
+    .join("\u{1f}")
 }
 
 /// Same rule as the main window's live merge (`shouldMergeMultipart`).
@@ -299,6 +353,18 @@ fn record(conn: &Connection, message: &Value, now: i64) -> rusqlite::Result<(Str
     insert_row(conn, message, now, now)
 }
 
+/// Store a packet unless a copy of it was stored within the duplicate
+/// window. Returns the row it is in and whether it was a duplicate.
+fn receive(conn: &Connection, recent: &mut RecentPackets, message: &Value, now: i64) -> rusqlite::Result<((String, i64), bool)> {
+    let fingerprint = fingerprint(message);
+    if let Some(first) = recent.find(&fingerprint, now) {
+        return Ok((first, true));
+    }
+    let stored = record(conn, message, now)?;
+    recent.remember(fingerprint, &stored.0, stored.1, now);
+    Ok((stored, false))
+}
+
 /// Delete short-lived rows stored more than `retention_days` ago. Zero
 /// keeps everything.
 fn prune(conn: &Connection, retention_days: u32, now: i64) -> rusqlite::Result<usize> {
@@ -364,22 +430,28 @@ fn search(conn: &Connection, query: &str, before_seq: Option<i64>, limit: usize)
 /// Store a received packet and stamp `event` with the row's UUID and
 /// sequence so the windows can tell it apart from older pages. Called from
 /// the TNC and APRS-IS receive paths before the `tnc_message` event goes
-/// out. A storage failure leaves the event unstamped and the app running.
+/// out. A duplicate is not stored: it is stamped with the first copy's UUID
+/// and sequence and marked `duplicate`, so the Traffic Log still shows every
+/// copy heard while the message lists show one. A storage failure leaves the
+/// event unstamped and the app running.
 pub fn record_received(app: &AppHandle, event: &mut Value) {
     let normalized = crate::settings::normalize_received_message(event.clone());
     let retention_days = crate::settings::load_settings(app.clone()).short_lived_retention_days;
     let stored = with_store(app, |store| {
         let now = now_ms();
-        let stored = record(&store.conn, &normalized, now).map_err(|err| err.to_string())?;
+        let stored = receive(&store.conn, &mut store.recent, &normalized, now).map_err(|err| err.to_string())?;
         if store.last_prune.is_none_or(|at| at.elapsed() >= PRUNE_INTERVAL) {
             let _ = prune(&store.conn, retention_days, now);
             store.last_prune = Some(Instant::now());
         }
         Ok(stored)
     });
-    if let (Ok((uuid, seq)), Some(obj)) = (stored, event.as_object_mut()) {
+    if let (Ok(((uuid, seq), duplicate)), Some(obj)) = (stored, event.as_object_mut()) {
         obj.insert("uuid".to_string(), Value::String(uuid));
         obj.insert("seq".to_string(), Value::from(seq));
+        if duplicate {
+            obj.insert("duplicate".to_string(), Value::Bool(true));
+        }
     }
 }
 
@@ -527,6 +599,58 @@ mod tests {
             attempts,
             detail: None,
         }
+    }
+
+    fn heard(from: &str, info: &str, body: &str) -> Value {
+        json!({ "from": from, "to": "AD6DM-15", "body": body, "aprsType": "msg", "isBulletin": false, "info_text": info })
+    }
+
+    fn row_count(conn: &Connection) -> i64 {
+        conn.query_row("SELECT count(*) FROM received", [], |row| row.get(0)).unwrap()
+    }
+
+    #[test]
+    fn packet_heard_over_two_paths_is_stored_once() {
+        let conn = memory_db();
+        let mut recent = RecentPackets::default();
+        let rf = heard("N6TEST-7", ":AD6DM-15 :Hello there{12", "Hello there");
+        let aprsis = heard("N6TEST-7", "}N6TEST-7>APRS,TCPIP,AD6DM-15*::AD6DM-15 :Hello there{12", "Hello there");
+        let (first, dup_first) = receive(&conn, &mut recent, &rf, 1_000).unwrap();
+        let (second, dup_second) = receive(&conn, &mut recent, &aprsis, 4_000).unwrap();
+        assert!(!dup_first);
+        assert!(dup_second);
+        assert_eq!(first, second);
+        assert_eq!(row_count(&conn), 1);
+    }
+
+    #[test]
+    fn resend_after_the_window_is_stored_again() {
+        let conn = memory_db();
+        let mut recent = RecentPackets::default();
+        let packet = heard("N6TEST-7", ":AD6DM-15 :Hello there{12", "Hello there");
+        receive(&conn, &mut recent, &packet, 1_000).unwrap();
+        let (_, duplicate) = receive(&conn, &mut recent, &packet, 1_000 + DUPLICATE_WINDOW_MS).unwrap();
+        assert!(!duplicate);
+        assert_eq!(row_count(&conn), 2);
+    }
+
+    #[test]
+    fn same_text_with_a_new_message_number_is_a_new_message() {
+        let conn = memory_db();
+        let mut recent = RecentPackets::default();
+        receive(&conn, &mut recent, &heard("N6TEST-7", ":AD6DM-15 :73{12", "73"), 1_000).unwrap();
+        let (_, duplicate) = receive(&conn, &mut recent, &heard("N6TEST-7", ":AD6DM-15 :73{13}", "73"), 2_000).unwrap();
+        assert!(!duplicate);
+        assert_eq!(row_count(&conn), 2);
+    }
+
+    #[test]
+    fn message_number_reads_plain_reply_ack_and_third_party_forms() {
+        assert_eq!(message_number(&heard("A", ":AD6DM-15 :hi{12", "hi")), Some("12"));
+        assert_eq!(message_number(&heard("A", ":AD6DM-15 :hi{12}34", "hi")), Some("12"));
+        assert_eq!(message_number(&heard("A", "}A>APRS,TCPIP*::AD6DM-15 :hi{AB", "hi")), Some("AB"));
+        assert_eq!(message_number(&heard("A", ":AD6DM-15 :no number", "no number")), None);
+        assert_eq!(message_number(&heard("A", "!3830.00N/12130.00W>", "")), None);
     }
 
     #[test]

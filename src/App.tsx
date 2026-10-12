@@ -533,7 +533,9 @@ function App() {
         const summary = summarySource && summaryDestination
           ? `${summarySource} > ${summaryDestination}${path}: ${normalizedBody}`
           : event.payload.text;
-        pushEventLog("rx", `RX ${event.payload.bytes}B ${summary} [${event.payload.payload_hex}]`);
+        const dup = event.payload.duplicate ? " (duplicate)" : "";
+        pushEventLog("rx", `RX ${event.payload.bytes}B ${summary}${dup} [${event.payload.payload_hex}]`);
+        if (event.payload.duplicate) return;
         setReceivedItems((prev) => {
           const now = Date.now();
           const from = event.payload.from;

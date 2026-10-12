@@ -133,7 +133,7 @@ fn settings_path(app: &AppHandle) -> Result<std::path::PathBuf, String> {
     Ok(dir.join(SETTINGS_FILE))
 }
 
-fn unwrap_third_party_info(raw: &str) -> Option<&str> {
+pub(crate) fn unwrap_third_party_info(raw: &str) -> Option<&str> {
     let trimmed = raw.trim();
     let inner = trimmed.strip_prefix('}')?;
     let colon = inner.find(':')?;

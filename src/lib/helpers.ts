@@ -82,6 +82,9 @@ export type MessagePayload = {
   // Set by the backend once the packet is in the message history.
   uuid?: string;
   seq?: number;
+  // Another copy of a packet already stored (heard over a second path);
+  // uuid and seq then name the first copy's row.
+  duplicate?: boolean;
 };
 
 export function hasNormalizedMessagePayload(
