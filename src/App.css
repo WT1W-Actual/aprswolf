@@ -124,8 +124,9 @@ body {
   cursor: help;
 }
 
+/* Centered in the free space between the version and the clock. */
 .header-status {
-  margin: 0 0 0 auto;
+  margin: 0 auto;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -133,6 +134,15 @@ body {
   font-size: 12px;
   font-weight: 600;
   color: #3c3c43;
+}
+
+.header-clock {
+  flex-shrink: 0;
+  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 12px;
+  color: #6e6e73;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
 }
 
 .app-logo {
@@ -773,6 +783,11 @@ form.preferences-window-body .preferences-grid-four {
   margin-left: 0;
 }
 
+/* Same for Traffic Log beside the header clock. */
+.header-clock + .log-window-btn {
+  margin-left: 0;
+}
+
 .msg-pane-header {
   display: flex;
   align-items: center;
@@ -1238,6 +1253,10 @@ form.preferences-window-body .preferences-grid-four {
 :root[data-theme="dark"] .app-header h1,
 :root[data-theme="dark"] .header-status {
   color: #e4e6eb;
+}
+
+:root[data-theme="dark"] .header-clock {
+  color: #a1a1a6;
 }
 
 

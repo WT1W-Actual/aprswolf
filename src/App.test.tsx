@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import App from "./App";
+import { formatHeaderClock } from "./HeaderClock";
 import HelpWindow from "./HelpWindow";
 import LogWindow from "./LogWindow";
 import PreferencesWindow from "./PreferencesWindow";
@@ -860,6 +861,19 @@ describe("App", () => {
     expect(await screen.findByText("Bring a dish to the potluck")).toBeInTheDocument();
     expect(invokeMock).toHaveBeenCalledWith("search_received_messages", { query: "potluck" });
     expect(screen.getByText(new Date(old).toLocaleString())).toBeInTheDocument();
+  });
+
+  it("shows UTC and local time in the header row", async () => {
+    render(<App />);
+    const clock = await screen.findByTitle("UTC and local time");
+    expect(clock.closest("header")).toBeInTheDocument();
+    expect(clock.textContent).toMatch(/^\d{2}:\d{2}Z \d{2}:\d{2} \S+$/);
+  });
+
+  it("formats the header clock as 24-hour UTC and local hh:mm", () => {
+    const when = new Date(Date.UTC(2026, 9, 12, 15, 8, 30));
+    const [utc] = formatHeaderClock(when).split(" ");
+    expect(utc).toBe("15:08Z");
   });
 
   it("lists sent messages from earlier sessions and keeps their status current", async () => {

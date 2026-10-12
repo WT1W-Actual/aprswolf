@@ -29,6 +29,7 @@ import { useToMeUnread } from "./lib/useToMeUnread";
 import { setAppBadge } from "./lib/appBadge";
 import { useWindowFocused } from "./lib/useWindowFocused";
 import UnreadDot from "./UnreadDot";
+import HeaderClock from "./HeaderClock";
 import { formatReceivedTime, useMessageSearch } from "./lib/messageHistory";
 import packageJson from "../package.json";
 
@@ -1111,6 +1112,7 @@ function App() {
           {appVersion}
         </span>
         <p className="header-status" aria-live="polite">{dashboardStatus}</p>
+        <HeaderClock />
         <button type="button" className="log-window-btn" onClick={openLogWindow}>Traffic Log ↗</button>
         <button
           type="button"
