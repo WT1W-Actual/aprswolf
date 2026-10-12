@@ -29,6 +29,7 @@ Use the in-app help reference for:
 - the Help window topic map
 - quick answers while the app is open
 - a condensed user-oriented explanation of each major screen and workflow
+- standard connection defaults and how to launch the remote UI
 
 Screenshot assets used in the docs are stored under `docs/images/`.
 
@@ -37,13 +38,14 @@ Screenshot assets used in the docs are stored under `docs/images/`.
 Use the releases index and template for:
 
 - versioned release notes
-- DMG publish notes
+- multi-platform release notes
 - upgrade notes
 - known issues tracking
 
 ## Typical Workflow
 
 1. Read [END-USER-GUIDE.md](END-USER-GUIDE.md) for product usage documentation.
-2. Build release artifacts with the macOS release commands from the project README.
-3. Copy [RELEASE-NOTES-TEMPLATE.md](RELEASE-NOTES-TEMPLATE.md) into `docs/releases/X.Y.Z.md`.
+2. Update the package, Cargo, and Tauri versions together.
+3. Copy [RELEASE-NOTES-TEMPLATE.md](RELEASE-NOTES-TEMPLATE.md) into `docs/releases/X.Y.Z.md` and describe user-visible changes.
 4. Add the new release file to [releases/README.md](releases/README.md).
+5. Run verification and either build on each target OS or push a `v*` tag to run the multi-platform release workflow.

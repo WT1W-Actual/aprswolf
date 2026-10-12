@@ -26,6 +26,7 @@ This document mirrors the Help window available from inside APRSWolf.
 
 - `Preferences` is the first stop for a new user.
 - Save your callsign, digi path, theme, sound, ACK visibility, beacon coordinates, TNC settings, APRS-IS settings, and remote web defaults there.
+- Standard connection defaults include TNC `127.0.0.1:8001` with path `WIDE1-1,WIDE2-1`, APRS-IS `rotate.aprs2.net:14580`, and Remote Web Control port `18420`.
 - Use the main window for live operating after setup is saved.
 
 ### Station Setup
@@ -68,8 +69,10 @@ This document mirrors the Help window available from inside APRSWolf.
 ### Remote Web Control
 
 - Enable the browser-based control page from the Remote Web Control panel.
+- Click `Open Remote UI` to open the page in the system browser; the displayed URL can also be opened on another device.
 - While remote control is enabled, desktop controls stay visible but locked.
 - Disable Remote to restore normal desktop interaction.
+- With no remote token configured, the server is limited to this computer.
 
 ### Help Menu
 

@@ -361,12 +361,13 @@ platform-specific behavior to keep in mind.
 See the [project README](../README.md) for quick-start commands. Full release process:
 
 ```bash
-# 1. Bump version in package.json (version + displayVersion),
-#    src-tauri/Cargo.toml, and src-tauri/tauri.conf.json
+# 1. Bump package.json version, src-tauri/Cargo.toml, and
+#    src-tauri/tauri.conf.json; refresh the package and Cargo lockfiles.
+#    Keep displayVersion unchanged unless download labels should change.
 # 2. Write release notes (copy RELEASE-NOTES-TEMPLATE.md → docs/releases/X.Y.Z.md)
 #    and add the new version to docs/releases/README.md
 # 3. Commit, then push a version tag:
-git tag v1.0.0 && git push origin v1.0.0
+git tag v1.0.2 && git push origin v1.0.2
 # 4. The `release` GitHub Actions workflow builds all platforms and
 #    attaches every artifact to a single GitHub Release.
 ```
@@ -398,10 +399,12 @@ DMGs.
 
 | Version | Date | Key Changes |
 |---------|------|-------------|
+| 1.0.2 | 2026-10-12 | Preferences now provide working standard connection defaults; Open Remote UI launches the system browser. |
+| 1.0.1 | 2026-10-11 | Bug fixes for message delivery, malformed input, remote access, and duplicate Traffic Log lines. |
 | 1.0 | 2026-05-21 | First stable release. Consolidated RX/Mic-E improvements, pop-out received window, in-app help, remote web control parity. |
 | (post-1.0) | 2026-06-17 | Code quality audit - extracted remote HTML, deduplicated types/hooks/helpers, dev logging guard. No user-facing changes. |
 
 ---
 
-*Last updated: 2026-06-17 - Ponytail code audit results integrated.*
+*Last updated: 2026-10-12 - v1.0.2 release changes integrated.*
 *Next reader: you. This doc is your insurance against repeating the same bugs twice.*

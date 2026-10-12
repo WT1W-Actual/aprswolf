@@ -79,6 +79,7 @@ export const HELP_SECTIONS: HelpSection[] = [
           "APRS-IS server, port, passcode, and receive filter.",
           "Beacon latitude, longitude, and symbol.",
           "Remote Web Control port and launch behavior.",
+          "Standard defaults include TNC 127.0.0.1:8001 with path WIDE1-1,WIDE2-1, APRS-IS rotate.aprs2.net:14580, and Remote Web Control port 18420.",
         ],
       },
       {
@@ -254,7 +255,7 @@ export const HELP_SECTIONS: HelpSection[] = [
         items: [
           "Choose a Web Port in the Remote Web Control section.",
           "Click Enable Remote.",
-          "Open the shown local URL in a browser or use Open Remote UI.",
+          "Open the shown local URL in a browser or use Open Remote UI, which launches your system browser in the desktop app.",
           "Disable Remote from the desktop app when you want to restore desktop controls.",
         ],
       },

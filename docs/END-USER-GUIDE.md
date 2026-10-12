@@ -93,7 +93,7 @@ Use `Preferences` for all saved setup. The main window is intended for live conn
 ### Station Settings
 
 - Callsign: your APRS callsign, including SSID if needed, such as `WT1W-15`
-- Digi Path: the digipeater path to use for RF messaging, such as `WIDE1-1,WIDE2-1`
+- Digi Path: the digipeater path to use for RF messaging; the default is `WIDE1-1,WIDE2-1`
 - Theme: `System`, `Light`, or `Dark`
 - Message Sound: plays the system alert sound for messages addressed to you (macOS only; a no-op on Windows and Linux)
 - Message Font Size: slider to resize sent and received message text (range 10–32px, default 15px)
@@ -103,15 +103,15 @@ Use `Preferences` for all saved setup. The main window is intended for live conn
 
 Use this when talking to Dire Wolf over TCP.
 
-- Host: usually the machine running Dire Wolf
-- Port: usually the KISS or compatible TCP port you configured in Dire Wolf
+- Host: defaults to `127.0.0.1` for Dire Wolf on this computer; change it if Dire Wolf is on another machine
+- Port: defaults to `8001`; change it to the KISS or compatible TCP port configured in Dire Wolf
 
 ### APRS-IS Settings
 
 Use this when you want internet APRS messaging instead of RF.
 
-- Server: default is usually `rotate.aprs2.net`
-- Port: default is usually `14580`
+- Server: defaults to `rotate.aprs2.net`
+- Port: defaults to `14580`
 - Pass: APRS-IS passcode for your callsign
 - Filter: APRS-IS server-side receive filter. Leave it blank by default unless you want APRSWolf to send a filter command.
 
@@ -353,13 +353,16 @@ When remote control is enabled:
 - the desktop controls remain visible but locked
 - you can control APRSWolf from a browser on your network
 - the remote UI uses the same persisted settings as the desktop app
+- `Open Remote UI` opens the displayed URL in your system browser from the desktop app
 
 Typical use:
 
-1. Set a web port.
+1. Leave the default web port (`18420`) or choose another available port.
 2. Click `Enable Remote`.
-3. Open the displayed URL in a browser.
+3. Click `Open Remote UI` to open the page on this computer, or open the displayed URL in another device's browser.
 4. Use `Disable Remote` when finished.
+
+The remote token is empty by default, which restricts the server to this computer. Set a token before connecting from another device on your network. The `Enable remote on launch` preference is off by default.
 
 ## Everyday Use Tips
 

@@ -21,7 +21,8 @@ timer.
 Leave the radio in the shack and run it from the couch: the built-in
 remote control serves a browser page you can open from your phone on
 the local network once you set a remote token. It runs on macOS, Linux
-and Windows.
+and Windows. From the desktop app, `Open Remote UI` opens that page in
+your system browser.
 
 ## Download
 
@@ -91,7 +92,7 @@ The [End User Guide](docs/END-USER-GUIDE.md) walks through the rest.
 - In-app help reference: see [docs/IN-APP-HELP.md](docs/IN-APP-HELP.md)
 - Release notes template: see [docs/RELEASE-NOTES-TEMPLATE.md](docs/RELEASE-NOTES-TEMPLATE.md)
 - Release index: see [docs/releases/README.md](docs/releases/README.md)
-- Current release notes: see [docs/releases/1.0.md](docs/releases/1.0.md)
+- Current release notes: see [docs/releases/1.0.2.md](docs/releases/1.0.2.md)
 - Developers: use the build and test notes below
 
 ## What It Does
@@ -105,6 +106,7 @@ The [End User Guide](docs/END-USER-GUIDE.md) walks through the rest.
 - Supports click-to-reply from Received messages.
 - Includes a dedicated Help window with guided setup and troubleshooting topics.
 - Exposes native macOS `Preferences...` and `Help > APRSWolf Help` menu items.
+- Opens the enabled Remote Web Control page in the system browser from the desktop app.
 - Supports a Received filter (To Me Only).
 - Supports optional Traffic Log panel (off by default).
 - Auto-derives APRS-IS passcode from the source callsign.
