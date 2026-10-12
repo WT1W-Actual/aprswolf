@@ -142,6 +142,28 @@ CREATE TABLE sent (
 );
 ";
 
+/// Full-text search over sent messages, and a hidden flag on both tables for
+/// messages cleared from the lists but kept in the database.
+const SCHEMA_SEARCH_SENT: &str = "
+ALTER TABLE sent ADD COLUMN hidden INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE received ADD COLUMN hidden INTEGER NOT NULL DEFAULT 0;
+CREATE VIRTUAL TABLE sent_fts USING fts5(
+    to_call, body,
+    content='sent', content_rowid='seq'
+);
+CREATE TRIGGER sent_ai AFTER INSERT ON sent BEGIN
+    INSERT INTO sent_fts(rowid, to_call, body) VALUES (new.seq, new.to_call, new.body);
+END;
+CREATE TRIGGER sent_ad AFTER DELETE ON sent BEGIN
+    INSERT INTO sent_fts(sent_fts, rowid, to_call, body) VALUES ('delete', old.seq, old.to_call, old.body);
+END;
+CREATE TRIGGER sent_au AFTER UPDATE OF to_call, body ON sent BEGIN
+    INSERT INTO sent_fts(sent_fts, rowid, to_call, body) VALUES ('delete', old.seq, old.to_call, old.body);
+    INSERT INTO sent_fts(rowid, to_call, body) VALUES (new.seq, new.to_call, new.body);
+END;
+INSERT INTO sent_fts(sent_fts) VALUES ('rebuild');
+";
+
 fn migrate(conn: &Connection) -> rusqlite::Result<()> {
     let version: i64 = conn.pragma_query_value(None, "user_version", |row| row.get(0))?;
     if version < 1 {
@@ -151,6 +173,10 @@ fn migrate(conn: &Connection) -> rusqlite::Result<()> {
     if version < 2 {
         conn.execute_batch(SCHEMA_SENT)?;
         conn.pragma_update(None, "user_version", 2)?;
+    }
+    if version < 3 {
+        conn.execute_batch(SCHEMA_SEARCH_SENT)?;
+        conn.pragma_update(None, "user_version", 3)?;
     }
     Ok(())
 }
@@ -509,27 +535,47 @@ fn expire_unfinished_sent(conn: &Connection, now: i64) -> rusqlite::Result<usize
     )
 }
 
+const SENT_COLUMNS: &str =
+    "s.seq, s.uuid, s.created_at, s.updated_at, s.from_call, s.to_call, s.body, s.path, s.status, s.attempts, s.detail, s.hidden";
+
+fn sent_row_to_value(row: &rusqlite::Row) -> rusqlite::Result<Value> {
+    Ok(serde_json::json!({
+        "seq": row.get::<_, i64>(0)?,
+        "uuid": row.get::<_, String>(1)?,
+        "timestamp": row.get::<_, i64>(2)?,
+        "updatedAt": row.get::<_, i64>(3)?,
+        "source": row.get::<_, String>(4)?,
+        "destination": row.get::<_, String>(5)?,
+        "body": row.get::<_, String>(6)?,
+        "path": row.get::<_, String>(7)?,
+        "status": row.get::<_, String>(8)?,
+        "attempts": row.get::<_, u32>(9)?,
+        "detail": row.get::<_, Option<String>>(10)?,
+        "hidden": row.get::<_, bool>(11)?,
+    }))
+}
+
 /// One page of sent messages, newest first, older than `before_seq` when given.
 fn sent_page(conn: &Connection, before_seq: Option<i64>, limit: usize) -> rusqlite::Result<Vec<Value>> {
-    let mut stmt = conn.prepare(
-        "SELECT seq, uuid, created_at, updated_at, from_call, to_call, body, path, status, attempts, detail
-         FROM sent WHERE seq < ?1 ORDER BY seq DESC LIMIT ?2",
-    )?;
-    let rows = stmt.query_map(params![before_seq.unwrap_or(i64::MAX), limit as i64], |row| {
-        Ok(serde_json::json!({
-            "seq": row.get::<_, i64>(0)?,
-            "uuid": row.get::<_, String>(1)?,
-            "timestamp": row.get::<_, i64>(2)?,
-            "updatedAt": row.get::<_, i64>(3)?,
-            "source": row.get::<_, String>(4)?,
-            "destination": row.get::<_, String>(5)?,
-            "body": row.get::<_, String>(6)?,
-            "path": row.get::<_, String>(7)?,
-            "status": row.get::<_, String>(8)?,
-            "attempts": row.get::<_, u32>(9)?,
-            "detail": row.get::<_, Option<String>>(10)?,
-        }))
-    })?;
+    let mut stmt = conn.prepare(&format!(
+        "SELECT {SENT_COLUMNS} FROM sent s WHERE s.seq < ?1 ORDER BY s.seq DESC LIMIT ?2"
+    ))?;
+    let rows = stmt.query_map(params![before_seq.unwrap_or(i64::MAX), limit as i64], sent_row_to_value)?;
+    rows.collect()
+}
+
+/// Sent messages whose addressee or text match every word in `query`,
+/// newest first, hidden ones included.
+fn search_sent(conn: &Connection, query: &str, before_seq: Option<i64>, limit: usize) -> rusqlite::Result<Vec<Value>> {
+    let Some(fts) = fts_query(query) else {
+        return Ok(Vec::new());
+    };
+    let mut stmt = conn.prepare(&format!(
+        "SELECT {SENT_COLUMNS} FROM sent_fts f JOIN sent s ON s.seq = f.rowid
+         WHERE sent_fts MATCH ?1 AND s.seq < ?2
+         ORDER BY s.seq DESC LIMIT ?3"
+    ))?;
+    let rows = stmt.query_map(params![fts, before_seq.unwrap_or(i64::MAX), limit as i64], sent_row_to_value)?;
     rows.collect()
 }
 
@@ -544,6 +590,18 @@ pub fn record_sent(app: &AppHandle, rec: &SentRecord) {
 pub fn load_sent_messages(app: AppHandle, before_seq: Option<i64>, limit: Option<usize>) -> Vec<Value> {
     let limit = limit.unwrap_or(PAGE_SIZE).min(PAGE_SIZE);
     with_store(&app, |store| sent_page(&store.conn, before_seq, limit).map_err(|err| err.to_string())).unwrap_or_default()
+}
+
+/// Full-text search over sent messages' addressees and text.
+#[tauri::command]
+pub fn search_sent_messages(
+    app: AppHandle,
+    query: String,
+    before_seq: Option<i64>,
+    limit: Option<usize>,
+) -> Result<Vec<Value>, String> {
+    let limit = limit.unwrap_or(PAGE_SIZE).min(PAGE_SIZE);
+    with_store(&app, |store| search_sent(&store.conn, &query, before_seq, limit).map_err(|err| err.to_string()))
 }
 
 /// The newest page of history, for the web remote's state snapshot.
@@ -702,13 +760,67 @@ mod tests {
     }
 
     #[test]
+    fn sent_search_matches_addressee_and_text_across_pages() {
+        let conn = memory_db();
+        for i in 0..5 {
+            let uuid = format!("u{i}");
+            let mut rec = sent(&uuid, if i % 2 == 0 { "N6TEST-7" } else { "K6TEST-9" }, "acked", 1);
+            let body = format!("net check {i}");
+            rec.body = &body;
+            upsert_sent(&conn, &rec, 1_000 + i).unwrap();
+        }
+        let by_call = search_sent(&conn, "n6test", None, 200).unwrap();
+        assert_eq!(by_call.len(), 3);
+        assert_eq!(by_call[0]["destination"], "N6TEST-7");
+        assert_eq!(by_call[0]["body"], "net check 4");
+        let by_text = search_sent(&conn, "net check", None, 2).unwrap();
+        assert_eq!(by_text.len(), 2);
+        let older = search_sent(&conn, "net check", by_text[1]["seq"].as_i64(), 200).unwrap();
+        assert_eq!(older.len(), 3);
+        assert!(search_sent(&conn, "zzz", None, 200).unwrap().is_empty());
+    }
+
+    #[test]
+    fn sent_search_reports_hidden_messages() {
+        let conn = memory_db();
+        upsert_sent(&conn, &sent("u1", "N6TEST-7", "acked", 1), 1_000).unwrap();
+        conn.execute("UPDATE sent SET hidden = 1 WHERE uuid = 'u1'", []).unwrap();
+        let hits = search_sent(&conn, "N6TEST", None, 200).unwrap();
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0]["hidden"], true);
+    }
+
+    #[test]
+    fn status_updates_keep_sent_search_current() {
+        let conn = memory_db();
+        upsert_sent(&conn, &sent("u1", "N6TEST-7", "queued", 0), 1_000).unwrap();
+        upsert_sent(&conn, &sent("u1", "N6TEST-7", "acked", 1), 2_000).unwrap();
+        let hits = search_sent(&conn, "N6TEST", None, 200).unwrap();
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0]["status"], "acked");
+    }
+
+    #[test]
+    fn version_2_database_indexes_existing_sent_messages() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(SCHEMA).unwrap();
+        conn.execute_batch(SCHEMA_SENT).unwrap();
+        conn.pragma_update(None, "user_version", 2).unwrap();
+        upsert_sent(&conn, &sent("old", "W6TEST-1", "acked", 1), 1_000).unwrap();
+        migrate(&conn).unwrap();
+        let version: i64 = conn.pragma_query_value(None, "user_version", |row| row.get(0)).unwrap();
+        assert_eq!(version, 3);
+        assert_eq!(search_sent(&conn, "W6TEST", None, 200).unwrap().len(), 1);
+    }
+
+    #[test]
     fn version_1_database_gains_the_sent_table() {
         let conn = Connection::open_in_memory().unwrap();
         conn.execute_batch(SCHEMA).unwrap();
         conn.pragma_update(None, "user_version", 1).unwrap();
         migrate(&conn).unwrap();
         let version: i64 = conn.pragma_query_value(None, "user_version", |row| row.get(0)).unwrap();
-        assert_eq!(version, 2);
+        assert_eq!(version, 3);
         upsert_sent(&conn, &sent("s-1", "N6TEST-7", "queued", 0), 1_000).unwrap();
     }
 

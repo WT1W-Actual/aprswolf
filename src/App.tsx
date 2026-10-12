@@ -21,6 +21,7 @@ import { type AppSettingsPayload, type ReceivedFilter, type ThemeMode, FILTER_OP
 import {
   isReceivedWindowOpen,
   publishReceivedSnapshot,
+  type SentItem,
   subscribePopoutFocus,
   subscribeReceivedWindowState,
   type ReceivedItem,
@@ -50,16 +51,6 @@ type WebServerStatusPayload = {
   enabled: boolean;
   port?: number | null;
   url?: string | null;
-};
-
-type SentItem = {
-  id: number;
-  // Key of the row in the sent history; delivery updates match on it.
-  uuid?: string;
-  timestamp: number;
-  destination: string;
-  body: string;
-  status: "queued" | "sent" | "acked" | "failed" | "expired";
 };
 
 type LogItem = {
@@ -393,9 +384,13 @@ function App() {
 
   const unreadToMe = useToMeUnread(receivedItems, source, promiscuousBaseCallsign);
 
-  // While the search box has text, the pane lists matches from the whole
-  // stored history instead of the live items.
-  const search = useMessageSearch();
+  // One search box, in the Sent header, filters both panes: while it has
+  // text, each lists matches from the whole stored history instead of its
+  // live items.
+  const [searchQuery, setSearchQuery] = useState("");
+  const search = useMessageSearch(searchQuery);
+  const sentSearch = useMessageSearch<SentItem>(searchQuery, "search_sent_messages");
+  const shownSent = sentSearch.results ?? sentItems;
   const shownReceived = search.results ?? receivedItems;
 
   // Focus marks messages read (see useToMeUnread), but the badge also hides
@@ -590,12 +585,12 @@ function App() {
           kind,
           `delivery #${event.payload.id} ${event.payload.status} attempts=${event.payload.attempts}${detail}`,
         );
-        // Match on the history UUID: items loaded from earlier sessions carry
-        // display ids that can collide with this session's queue ids.
+        // Match on the history UUID, or on the queue number for a message
+        // the store never recorded.
         const { uuid, id, status } = event.payload;
         setSentItems((prev) =>
           prev.map((item) =>
-            (uuid ? item.uuid === uuid : item.id === id) ? { ...item, status } : item,
+            (uuid ? item.uuid === uuid : item.queueId === id) ? { ...item, status } : item,
           ),
         );
       });
@@ -788,7 +783,8 @@ function App() {
       );
       setSentItems((prev) => [
         {
-          id: result.id,
+          id: nextId(),
+          queueId: result.id,
           uuid: result.uuid,
           timestamp: Date.now(),
           destination: destinationCallsign,
@@ -843,7 +839,8 @@ function App() {
       );
       setSentItems((prev) => [
         {
-          id: result.id,
+          id: nextId(),
+          queueId: result.id,
           uuid: result.uuid,
           timestamp: Date.now(),
           destination: destinationCallsign,
@@ -1178,33 +1175,43 @@ function App() {
         <div className="msg-pane">
           <div className="msg-pane-header">
             <h2>Sent Messages</h2>
+            <input
+              type="search"
+              className="msg-pane-search"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.currentTarget.value)}
+              placeholder="Search all messages"
+              aria-label="Search message history"
+              title="Searches sent and received messages across the whole history"
+            />
           </div>
           <div className="msg-list">
-            {sentItems.length === 0 ? <p className="empty">No sent messages.</p> : null}
-            {sentItems.map((item) => (
-              <div key={item.id} className={`msg-item sent-item status-${item.status}`}>
+            {shownSent.length === 0 ? (
+              <p className="empty">{sentSearch.results ? "No sent messages match your search." : "No sent messages."}</p>
+            ) : null}
+            {shownSent.map((item) => (
+              <div key={item.uuid ?? item.id} className={`msg-item sent-item status-${item.status}`}>
                 <div className="msg-item-top-row">
                   <span className="msg-time">{formatReceivedTime(item.timestamp)}</span>
                   <span className="msg-addr">▶ {item.destination}</span>
+                  {item.hidden ? (
+                    <span className="msg-hidden-badge" title="Cleared from the list; kept in the database">hidden</span>
+                  ) : null}
                   <span className={`msg-badge ${item.status}`}>{item.status}</span>
                 </div>
                 <div className="msg-body">{item.body}</div>
               </div>
             ))}
+            {sentSearch.results && sentSearch.hasMore ? (
+              <button type="button" className="secondary received-window-load-older" onClick={() => void sentSearch.loadMore()}>
+                Load older matches
+              </button>
+            ) : null}
           </div>
         </div>
         <div className="msg-pane">
           <div className="msg-pane-header">
             <h2>Received Messages</h2>
-            <input
-              type="search"
-              className="msg-pane-search"
-              value={search.query}
-              onChange={(e) => search.setQuery(e.currentTarget.value)}
-              placeholder="Search all history"
-              aria-label="Search message history"
-              disabled={receivedWindowOpen}
-            />
             <button type="button" className="log-window-btn" onClick={openReceivedWindow}>
               {receivedWindowOpen ? "Focus Pop-Out ↗" : "Pop Out ↗"}
             </button>
@@ -1261,7 +1268,7 @@ function App() {
                 ) : null}
                 {filteredReceived.map((item) => (
                   <button
-                    key={item.id}
+                    key={item.uuid ?? item.id}
                     type="button"
                     className="msg-item recv-item recv-clickable"
                     onClick={() => openReplyDialog(item)}

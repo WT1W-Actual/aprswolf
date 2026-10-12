@@ -34,9 +34,8 @@ function ReceivedWindow() {
   // the main window keeps current through snapshots.
   const [olderItems, setOlderItems] = useState<ReceivedItem[]>([]);
   const [hasOlder, setHasOlder] = useState(false);
-  const search = useMessageSearch();
-  const searchQuery = search.query;
-  const setSearchQuery = search.setQuery;
+  const [searchQuery, setSearchQuery] = useState("");
+  const search = useMessageSearch(searchQuery);
   const searchResults = search.results;
   const [activeReceivedFilters, setActiveReceivedFilters] = useState<ReceivedFilter[]>(["all"]);
   const [showAckMessages, setShowAckMessages] = useState(false);
@@ -384,7 +383,7 @@ function ReceivedWindow() {
         ) : (
           filteredReceived.map((item) => (
             <button
-              key={item.id}
+              key={item.uuid ?? item.id}
               type="button"
               className="msg-item recv-item recv-clickable received-window-msg-item"
               onClick={() => openReplyDialog(item)}

@@ -7,8 +7,11 @@ import { type ReceivedItem } from "../receivedBus";
 // Rows per page from the message history; matches the backend's PAGE_SIZE.
 export const PAGE_SIZE = 200;
 
+/** Any message row from the history: received or sent. */
+type HistoryItem = { id: number; uuid?: string; seq?: number };
+
 /** Keep the first copy of each stored message, in order. */
-export function dedupeByUuid(items: ReceivedItem[]): ReceivedItem[] {
+export function dedupeByUuid<T extends HistoryItem>(items: T[]): T[] {
   const seen = new Set<string>();
   return items.filter((item) => {
     if (!item.uuid) return true;
@@ -19,7 +22,7 @@ export function dedupeByUuid(items: ReceivedItem[]): ReceivedItem[] {
 }
 
 /** Smallest stored sequence among `items`: the cursor for the next older page. */
-export function oldestSeq(items: ReceivedItem[]): number | undefined {
+export function oldestSeq(items: HistoryItem[]): number | undefined {
   let oldest: number | undefined;
   for (const item of items) {
     if (typeof item.seq === "number" && (oldest === undefined || item.seq < oldest)) {
@@ -36,23 +39,26 @@ export function formatReceivedTime(timestamp: number): string {
   return sameDay ? when.toLocaleTimeString() : when.toLocaleString();
 }
 
-export function withFreshIds(items: ReceivedItem[]): ReceivedItem[] {
+export function withFreshIds<T extends HistoryItem>(items: T[]): T[] {
   return items.map((item) => ({ ...item, id: nextId() }));
 }
 
-export type MessageSearch = {
-  query: string;
-  setQuery: (query: string) => void;
+export type MessageSearch<T extends HistoryItem = ReceivedItem> = {
   /** Matches across the whole stored history, or null while the box is empty. */
-  results: ReceivedItem[] | null;
+  results: T[] | null;
   hasMore: boolean;
   loadMore: () => Promise<void>;
 };
 
-/** Full-history search behind a search box, shared by the main window and the pop-out. */
-export function useMessageSearch(): MessageSearch {
-  const [query, setQuery] = useState("");
-  const [results, setResults] = useState<ReceivedItem[] | null>(null);
+/**
+ * Full-history search for what is typed in a search box. The caller owns the
+ * query, so one box can drive a received and a sent search together.
+ */
+export function useMessageSearch<T extends HistoryItem = ReceivedItem>(
+  query: string,
+  command: "search_received_messages" | "search_sent_messages" = "search_received_messages",
+): MessageSearch<T> {
+  const [results, setResults] = useState<T[] | null>(null);
   const [hasMore, setHasMore] = useState(false);
 
   // Search once typing pauses.
@@ -66,7 +72,7 @@ export function useMessageSearch(): MessageSearch {
     let current = true;
     const timer = window.setTimeout(async () => {
       try {
-        const hits = await invoke<ReceivedItem[]>("search_received_messages", { query: trimmed });
+        const hits = await invoke<T[]>(command, { query: trimmed });
         if (!current) return;
         setResults(withFreshIds(hits));
         setHasMore(hits.length >= PAGE_SIZE);
@@ -81,12 +87,12 @@ export function useMessageSearch(): MessageSearch {
       current = false;
       window.clearTimeout(timer);
     };
-  }, [query]);
+  }, [query, command]);
 
   async function loadMore() {
     if (!results) return;
     try {
-      const hits = await invoke<ReceivedItem[]>("search_received_messages", {
+      const hits = await invoke<T[]>(command, {
         query: query.trim(),
         beforeSeq: oldestSeq(results),
       });
@@ -97,5 +103,6 @@ export function useMessageSearch(): MessageSearch {
     }
   }
 
-  return { query, setQuery, results, hasMore, loadMore };
+  return { results, hasMore, loadMore };
 }
+

@@ -23,6 +23,23 @@ export type ReceivedItem = {
   protocol_info_text?: string;
 };
 
+export type SentItem = {
+  // Display id from this window's counter, like received items.
+  id: number;
+  // Key of the row in the sent history; delivery updates match on it.
+  uuid?: string;
+  // The backend queue's number for a message sent this session.
+  queueId?: number;
+  timestamp: number;
+  destination: string;
+  body: string;
+  status: "queued" | "sent" | "acked" | "failed" | "expired";
+  // Set on rows loaded from the history: the paging cursor, and whether the
+  // message was cleared from the list but kept in the database.
+  seq?: number;
+  hidden?: boolean;
+};
+
 type ReceivedSyncEvent =
   | {
       type: "snapshot";

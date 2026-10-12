@@ -1012,6 +1012,25 @@ form.preferences-window-body .preferences-grid-four {
   white-space: nowrap;
 }
 
+/* A search hit cleared from the list but kept in the database. It takes the
+   status badge's push to the right edge so the two sit together. */
+.msg-hidden-badge {
+  font-size: 10px;
+  padding: 1px 4px;
+  border-radius: 3px;
+  background: rgba(142, 142, 147, 0.18);
+  color: #8e8e93;
+  font-weight: 700;
+  text-transform: uppercase;
+  white-space: nowrap;
+  flex-shrink: 0;
+  margin-left: auto;
+}
+
+.msg-hidden-badge + .msg-badge {
+  margin-left: 0;
+}
+
 .msg-badge.queued  { background: #e8f0fa; color: #4a6fa5; }
 .msg-badge.sent    { background: #e8f0fa; color: #3557a0; }
 .msg-badge.acked   { background: rgba(52, 199, 89, 0.15); color: #1a7a3b; }

@@ -876,6 +876,39 @@ describe("App", () => {
     expect(utc).toBe("15:08Z");
   });
 
+  it("filters both panes from the one search field by Sent Messages", async () => {
+    invokeMock.mockImplementation((cmd: string, payload?: any) => {
+      if (cmd === "load_settings") return Promise.resolve(DEFAULT_SETTINGS);
+      if (cmd === "load_received_messages") return Promise.resolve([]);
+      if (cmd === "get_web_server_status") return Promise.resolve({ enabled: false, port: 18420, url: null });
+      if (cmd === "get_manual_beacon_cooldown_remaining") return Promise.resolve(0);
+      if (cmd === "search_received_messages" && payload?.query === "net") {
+        return Promise.resolve([
+          { uuid: "r-1", seq: 9, timestamp: Date.now(), from: "N6TEST-7", to: "WT1W-15", body: "Are you on the net", aprsType: "msg" },
+        ]);
+      }
+      if (cmd === "search_sent_messages" && payload?.query === "net") {
+        return Promise.resolve([
+          { uuid: "s-1", seq: 3, timestamp: Date.now(), destination: "N6TEST-7", body: "See you on the net", status: "acked", hidden: true },
+        ]);
+      }
+      return Promise.resolve(undefined);
+    });
+    render(<App />);
+
+    const field = await screen.findByLabelText("Search message history");
+    expect(field.closest(".msg-pane")?.querySelector("h2")?.textContent).toBe("Sent Messages");
+    expect(screen.getAllByRole("searchbox")).toHaveLength(1);
+
+    fireEvent.change(field, { target: { value: "net" } });
+
+    const sentRow = (await screen.findByText("See you on the net")).closest(".msg-item") as HTMLElement;
+    expect(within(sentRow).getByText("hidden")).toBeInTheDocument();
+    expect(await screen.findByText("Are you on the net")).toBeInTheDocument();
+    expect(invokeMock).toHaveBeenCalledWith("search_sent_messages", { query: "net" });
+    expect(invokeMock).toHaveBeenCalledWith("search_received_messages", { query: "net" });
+  });
+
   it("lists sent messages from earlier sessions and keeps their status current", async () => {
     invokeMock.mockImplementation((cmd: string) => {
       if (cmd === "load_settings") return Promise.resolve(DEFAULT_SETTINGS);
