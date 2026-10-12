@@ -744,6 +744,98 @@ describe("App", () => {
     expect(within(tncSection as HTMLElement).getByRole("button", { name: "Connect TNC" })).toBeEnabled();
   });
 
+  it("keeps received messages across restarts instead of clearing them", async () => {
+    invokeMock.mockImplementation((cmd: string) => {
+      if (cmd === "load_received_messages") {
+        return Promise.resolve([
+          { uuid: "u-1", seq: 1, timestamp: Date.now() - 60_000, from: "N0CALL-1", to: "WT1W-15", body: "Stored before restart", aprsType: "msg" },
+        ]);
+      }
+      if (cmd === "get_web_server_status") {
+        return Promise.resolve({ enabled: false, port: null, url: null });
+      }
+      if (cmd === "get_manual_beacon_cooldown_remaining") {
+        return Promise.resolve(0);
+      }
+      return Promise.resolve(undefined);
+    });
+
+    render(<App />);
+
+    expect(await screen.findByText("Stored before restart")).toBeInTheDocument();
+    expect(invokeMock).not.toHaveBeenCalledWith("save_received_messages", expect.anything());
+  });
+
+  it("searches the full message history from the received messages window", async () => {
+    invokeMock.mockImplementation((cmd: string) => {
+      if (cmd === "load_settings") {
+        return Promise.resolve({ source: "WT1W-15", show_ack_messages: false, theme_mode: "system" });
+      }
+      if (cmd === "load_received_messages") {
+        return Promise.resolve([
+          { uuid: "u-new", seq: 900, timestamp: Date.now(), from: "W1AW", to: "WT1W-15", body: "Newest note", aprsType: "msg" },
+        ]);
+      }
+      if (cmd === "search_received_messages") {
+        return Promise.resolve([
+          { uuid: "u-old", seq: 12, timestamp: Date.now() - 86_400_000 * 40, from: "KM4ACK-7", to: "WT1W-15", body: "Net tonight at 8", aprsType: "msg" },
+        ]);
+      }
+      return Promise.resolve(undefined);
+    });
+
+    render(<ReceivedWindow />);
+    expect(await screen.findByText("Newest note")).toBeInTheDocument();
+
+    fireEvent.change(screen.getByRole("searchbox", { name: "Search message history" }), {
+      target: { value: "km4ack" },
+    });
+
+    expect(await screen.findByText("Net tonight at 8")).toBeInTheDocument();
+    expect(screen.queryByText("Newest note")).not.toBeInTheDocument();
+    expect(invokeMock).toHaveBeenCalledWith("search_received_messages", { query: "km4ack" });
+
+    fireEvent.change(screen.getByRole("searchbox", { name: "Search message history" }), {
+      target: { value: "" },
+    });
+    expect(await screen.findByText("Newest note")).toBeInTheDocument();
+  });
+
+  it("loads older pages of message history on request", async () => {
+    const newestPage = Array.from({ length: 200 }, (_, i) => ({
+      uuid: `u-${1000 - i}`,
+      seq: 1000 - i,
+      timestamp: Date.now() - i * 1000,
+      from: "W1AW",
+      to: "WT1W-15",
+      body: `Page one note ${1000 - i}`,
+      aprsType: "msg",
+    }));
+    invokeMock.mockImplementation((cmd: string, payload?: { beforeSeq?: number }) => {
+      if (cmd === "load_settings") {
+        return Promise.resolve({ source: "WT1W-15", show_ack_messages: false, theme_mode: "system" });
+      }
+      if (cmd === "load_received_messages") {
+        if (payload?.beforeSeq === 801) {
+          return Promise.resolve([
+            { uuid: "u-5", seq: 5, timestamp: Date.now() - 86_400_000 * 3, from: "W1AW", to: "WT1W-15", body: "From last week", aprsType: "msg" },
+          ]);
+        }
+        return Promise.resolve(newestPage);
+      }
+      return Promise.resolve(undefined);
+    });
+
+    render(<ReceivedWindow />);
+    expect(await screen.findByText("Page one note 1000")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Load older messages" }));
+
+    expect(await screen.findByText("From last week")).toBeInTheDocument();
+    expect(invokeMock).toHaveBeenCalledWith("load_received_messages", { beforeSeq: 801 });
+    expect(screen.queryByRole("button", { name: "Load older messages" })).not.toBeInTheDocument();
+  });
+
   it("opens a reply dialog from the popped-out received messages window and sends a reply", async () => {
     invokeMock.mockImplementation((cmd: string) => {
       if (cmd === "load_settings") {

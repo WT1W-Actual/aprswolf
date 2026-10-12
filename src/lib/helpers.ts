@@ -75,6 +75,9 @@ export type MessagePayload = {
   summary_source: string;
   summary_destination?: string | null;
   mic_e_text: string | null;
+  // Set by the backend once the packet is in the message history.
+  uuid?: string;
+  seq?: number;
 };
 
 export function hasNormalizedMessagePayload(
@@ -151,6 +154,7 @@ export type SettingsParams = {
   promiscuousBaseCallsign?: boolean;
   themeMode?: "system" | "light" | "dark";
   msgFontSize?: number;
+  shortLivedRetentionDays?: number;
 };
 
 /**
@@ -180,5 +184,10 @@ export function buildSettingsPayload(params: SettingsParams): Record<string, unk
     promiscuous_base_callsign: params.promiscuousBaseCallsign ?? false,
     theme_mode: params.themeMode ?? "system",
     msg_font_size: params.msgFontSize ?? 15,
+    // Sent only when the caller sets it, so a save from a window that
+    // doesn't show the retention choice can't reset it (the backend merges).
+    ...(params.shortLivedRetentionDays !== undefined
+      ? { short_lived_retention_days: params.shortLivedRetentionDays }
+      : {}),
   };
 }

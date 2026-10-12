@@ -1,5 +1,9 @@
 export type ReceivedItem = {
   id: number;
+  // Stable identity and position in the message history; absent only when
+  // the store could not record the packet.
+  uuid?: string;
+  seq?: number;
   timestamp: number;
   from: string;
   to?: string;

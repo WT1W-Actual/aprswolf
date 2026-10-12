@@ -2,6 +2,7 @@ mod ax25;
 mod agw;
 mod aprsis;
 mod kiss;
+mod message_store;
 mod runtime;
 mod settings;
 mod tnc;
@@ -129,8 +130,8 @@ pub fn run() {
             aprsis::disconnect_aprsis,
             settings::load_settings,
             settings::save_settings,
-            settings::load_received_messages,
-            settings::save_received_messages,
+            message_store::load_received_messages,
+            message_store::search_received_messages,
             tnc::send_beacon,
             webserver::get_web_server_status,
             webserver::enable_web_server,

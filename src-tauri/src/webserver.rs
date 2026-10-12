@@ -265,7 +265,7 @@ async fn snapshot(app: &AppHandle) -> Result<RemoteStateSnapshot, String> {
         web_server: current_status(app),
         manual_beacon_cooldown_remaining_sec: crate::tnc::get_manual_beacon_cooldown_remaining(app.clone()),
         queue: crate::tnc::inspect_queue_for_app(app.clone()).await?,
-        received: settings::load_received_messages(app.clone()),
+        received: crate::message_store::recent(app),
     })
 }
 

@@ -1527,6 +1527,34 @@ button.secondary:hover:not(:disabled) {
   border-bottom: 1px solid rgba(60, 60, 67, 0.1);
 }
 
+.received-window-search-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px 0;
+  flex-shrink: 0;
+}
+
+.received-window-search {
+  flex: 1;
+  min-width: 0;
+}
+
+.received-window-search-note {
+  font-size: 11px;
+  color: #8e8e93;
+  white-space: nowrap;
+}
+
+.received-window-load-older {
+  align-self: center;
+  margin: 8px auto;
+}
+
+:root[data-theme="dark"] .received-window-search-note {
+  color: #aeb4bf;
+}
+
 .received-window-list {
   flex: 1;
   overflow-y: auto;

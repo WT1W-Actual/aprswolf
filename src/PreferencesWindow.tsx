@@ -27,6 +27,7 @@ const EMPTY_SETTINGS: AppSettingsPayload = {
   web_server_token: "",
   auto_beacon_on_connect: false,
   auto_beacon_interval_secs: 0,
+  short_lived_retention_days: 7,
   show_ack_messages: false,
   play_message_sound: true,
   promiscuous_base_callsign: false,
@@ -187,6 +188,7 @@ function PreferencesWindow() {
       promiscuousBaseCallsign: s.promiscuous_base_callsign,
       themeMode: s.theme_mode,
       msgFontSize: s.msg_font_size,
+      shortLivedRetentionDays: s.short_lived_retention_days,
     });
 
     try {
@@ -422,6 +424,24 @@ function PreferencesWindow() {
               </select>
             </label>
           </div>
+        </section>
+
+        <section className="panel preferences-panel">
+          <h2 className="section-title">Message History</h2>
+          <label>
+            Keep positions, weather and other short-lived packets for
+            <select
+              value={settings.short_lived_retention_days ?? 7}
+              onChange={(event) => updateSetting("short_lived_retention_days", Number(event.currentTarget.value))}
+              className="input-interval"
+            >
+              <option value={1}>1 day</option>
+              <option value={7}>7 days</option>
+              <option value={30}>30 days</option>
+              <option value={0}>Keep everything</option>
+            </select>
+            <span className="field-hint">Messages, queries and bulletins are always kept.</span>
+          </label>
         </section>
 
         <section className="panel preferences-panel">

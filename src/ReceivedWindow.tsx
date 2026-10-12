@@ -4,6 +4,7 @@ import { publishUiLog } from "./logBus";
 import {
   isAckMessageBody,
   matchesStationAddress,
+  nextId,
   normalizeOutboundCallsignInput,
 } from "./lib/helpers";
 import { useTheme } from "./lib/useTheme";
@@ -14,10 +15,53 @@ import {
 } from "./receivedBus";
 import { FILTER_OPTIONS, type AppSettingsPayload, type ReceivedFilter } from "./lib/types";
 
+// Rows per page from the message history; matches the backend's PAGE_SIZE.
+const PAGE_SIZE = 200;
+
+/** Keep the first copy of each stored message, in order. */
+function dedupeByUuid(items: ReceivedItem[]): ReceivedItem[] {
+  const seen = new Set<string>();
+  return items.filter((item) => {
+    if (!item.uuid) return true;
+    if (seen.has(item.uuid)) return false;
+    seen.add(item.uuid);
+    return true;
+  });
+}
+
+/** Smallest stored sequence among `items`: the cursor for the next older page. */
+function oldestSeq(items: ReceivedItem[]): number | undefined {
+  let oldest: number | undefined;
+  for (const item of items) {
+    if (typeof item.seq === "number" && (oldest === undefined || item.seq < oldest)) {
+      oldest = item.seq;
+    }
+  }
+  return oldest;
+}
+
+/** Time alone for today's messages; date and time once history spans days. */
+function formatReceivedTime(timestamp: number): string {
+  const when = new Date(timestamp);
+  const sameDay = when.toDateString() === new Date().toDateString();
+  return sameDay ? when.toLocaleTimeString() : when.toLocaleString();
+}
+
+function withFreshIds(items: ReceivedItem[]): ReceivedItem[] {
+  return items.map((item) => ({ ...item, id: nextId() }));
+}
+
 // ── Component ────────────────────────────────────────────────
 
 function ReceivedWindow() {
   const [receivedItems, setReceivedItems] = useState<ReceivedItem[]>([]);
+  // Pages fetched from the message history beyond the newest page, which
+  // the main window keeps current through snapshots.
+  const [olderItems, setOlderItems] = useState<ReceivedItem[]>([]);
+  const [hasOlder, setHasOlder] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searchResults, setSearchResults] = useState<ReceivedItem[] | null>(null);
+  const [searchHasMore, setSearchHasMore] = useState(false);
   const [activeReceivedFilters, setActiveReceivedFilters] = useState<ReceivedFilter[]>(["all"]);
   const [showAckMessages, setShowAckMessages] = useState(false);
   const [promiscuousBaseCallsign, setPromiscuousBaseCallsign] = useState(false);
@@ -94,7 +138,8 @@ function ReceivedWindow() {
     (async () => {
       try {
         const msgs = await invoke<ReceivedItem[]>("load_received_messages");
-        if (msgs.length > 0) setReceivedItems(msgs);
+        if (msgs.length > 0) setReceivedItems(withFreshIds(msgs));
+        setHasOlder(msgs.length >= PAGE_SIZE);
       } catch {/* no persisted messages */}
     })();
   }, []);
@@ -199,6 +244,63 @@ function ReceivedWindow() {
     }
   }
 
+  // Search the whole message history once typing pauses.
+  useEffect(() => {
+    const query = searchQuery.trim();
+    if (!query) {
+      setSearchResults(null);
+      setSearchHasMore(false);
+      return;
+    }
+    let current = true;
+    const timer = window.setTimeout(async () => {
+      try {
+        const hits = await invoke<ReceivedItem[]>("search_received_messages", { query });
+        if (!current) return;
+        setSearchResults(withFreshIds(hits));
+        setSearchHasMore(hits.length >= PAGE_SIZE);
+      } catch (error) {
+        if (!current) return;
+        setSearchResults([]);
+        setSearchHasMore(false);
+        publishUiLog("error", `search failed: ${String(error)}`);
+      }
+    }, 250);
+    return () => {
+      current = false;
+      window.clearTimeout(timer);
+    };
+  }, [searchQuery]);
+
+  const historyItems = useMemo(
+    () => dedupeByUuid([...receivedItems, ...olderItems]),
+    [olderItems, receivedItems],
+  );
+  const shownItems = searchResults ?? historyItems;
+
+  async function loadOlder() {
+    try {
+      if (searchResults) {
+        const hits = await invoke<ReceivedItem[]>("search_received_messages", {
+          query: searchQuery.trim(),
+          beforeSeq: oldestSeq(searchResults),
+        });
+        setSearchResults((prev) => dedupeByUuid([...(prev ?? []), ...withFreshIds(hits)]));
+        setSearchHasMore(hits.length >= PAGE_SIZE);
+        return;
+      }
+      const page = await invoke<ReceivedItem[]>("load_received_messages", {
+        beforeSeq: oldestSeq(historyItems),
+      });
+      setOlderItems((prev) => [...prev, ...withFreshIds(page)]);
+      setHasOlder(page.length >= PAGE_SIZE);
+    } catch (error) {
+      publishUiLog("error", `loading older messages failed: ${String(error)}`);
+    }
+  }
+
+  const canLoadMore = searchResults ? searchHasMore : hasOlder;
+
   function toggleFilter(key: ReceivedFilter) {
     setActiveReceivedFilters((current) => {
       if (key === "all") return ["all"];
@@ -214,8 +316,8 @@ function ReceivedWindow() {
 
   const filteredReceived = useMemo(() => {
     const ackFiltered = showAckMessages
-      ? receivedItems
-      : receivedItems.filter((item) => !isAckMessageBody(item.body));
+      ? shownItems
+      : shownItems.filter((item) => !isAckMessageBody(item.body));
 
     if (activeReceivedFilters.length === 0 || activeReceivedFilters.includes("all")) {
       return ackFiltered;
@@ -231,11 +333,11 @@ function ReceivedWindow() {
         return kind === filter;
       });
     });
-  }, [activeReceivedFilters, promiscuousBaseCallsign, receivedItems, showAckMessages, source]);
+  }, [activeReceivedFilters, promiscuousBaseCallsign, shownItems, showAckMessages, source]);
 
   const filterCounts = useMemo(() => {
     const counts: Record<ReceivedFilter, number> = {
-      all: receivedItems.length,
+      all: shownItems.length,
       to_me: 0,
       bulletin: 0,
       qry: 0,
@@ -250,7 +352,7 @@ function ReceivedWindow() {
       other: 0,
     };
 
-    for (const item of receivedItems) {
+    for (const item of shownItems) {
       const kind = (item.aprsType ?? "other") as ReceivedFilter;
       if (kind in counts && kind !== "all" && kind !== "to_me" && kind !== "bulletin") {
         counts[kind] += 1;
@@ -262,7 +364,7 @@ function ReceivedWindow() {
     }
 
     return counts;
-  }, [promiscuousBaseCallsign, receivedItems, source]);
+  }, [promiscuousBaseCallsign, shownItems, source]);
 
   const canSend = source.trim().length > 0 && replyTo.trim().length > 0 && replyMessage.trim().length > 0;
 
@@ -271,7 +373,7 @@ function ReceivedWindow() {
       <div className="received-window-toolbar">
         <span className="received-window-title">Received Messages</span>
         <span className="received-window-count">
-          {filteredReceived.length} / {receivedItems.length}
+          {filteredReceived.length} / {shownItems.length}
         </span>
         <label className="received-window-toggle">
           <input
@@ -284,6 +386,20 @@ function ReceivedWindow() {
         <button type="button" className="received-window-close" onClick={closeWindow}>
           Close Window
         </button>
+      </div>
+
+      <div className="received-window-search-row">
+        <input
+          type="search"
+          className="received-window-search"
+          value={searchQuery}
+          onChange={(e) => setSearchQuery(e.currentTarget.value)}
+          placeholder="Search callsigns and message text"
+          aria-label="Search message history"
+        />
+        {searchResults ? (
+          <span className="received-window-search-note">Searching all history</span>
+        ) : null}
       </div>
 
       <div className="rx-filter-bar received-window-filters" role="group" aria-label="Received message filters">
@@ -303,9 +419,11 @@ function ReceivedWindow() {
       <div className="received-window-list">
         {filteredReceived.length === 0 ? (
           <p className="received-window-empty">
-            {activeReceivedFilters.includes("to_me") && activeReceivedFilters.length === 1
+            {searchResults
+              ? "No messages match your search."
+              : activeReceivedFilters.includes("to_me") && activeReceivedFilters.length === 1
               ? "No messages addressed to you."
-              : receivedItems.length === 0
+              : shownItems.length === 0
                 ? "Waiting for messages…"
                 : "No received messages for this filter."}
           </p>
@@ -319,7 +437,7 @@ function ReceivedWindow() {
               title={`Reply to ${item.from}`}
             >
               <div className="msg-item-top-row">
-                <span className="msg-time">{new Date(item.timestamp).toLocaleTimeString()}</span>
+                <span className="msg-time">{formatReceivedTime(item.timestamp)}</span>
                 <span className="msg-addr">◀ {item.from}</span>
                 {item.to ? <span className="msg-addr">▶ {item.to}</span> : null}
                 {item.aprsType && item.aprsType !== "other" ? (
@@ -331,6 +449,11 @@ function ReceivedWindow() {
             </button>
           ))
         )}
+        {canLoadMore ? (
+          <button type="button" className="secondary received-window-load-older" onClick={loadOlder}>
+            Load older messages
+          </button>
+        ) : null}
       </div>
 
       {replyOpen ? (

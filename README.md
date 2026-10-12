@@ -44,7 +44,7 @@ No build tools needed.
 
 **Which ARM build do I need?** The `aarch64` DMG is for **Apple Silicon Macs**
 (M1 and later). The `arm64` Linux packages are for **ARM64 Linux**, such as a
-64-bit Raspberry Pi. They are not interchangeable — pick the one that matches
+64-bit Raspberry Pi. They are not interchangeable - pick the one that matches
 your operating system, not just the CPU family.
 
 The macOS and Windows builds aren't code-signed yet, so the first launch
@@ -108,6 +108,7 @@ The [End User Guide](docs/END-USER-GUIDE.md) walks through the rest.
 - Exposes native macOS `Preferences...` and `Help > APRSWolf Help` menu items.
 - Opens the enabled Remote Web Control page in the system browser from the desktop app.
 - Supports a Received filter (To Me Only).
+- Keeps received message history across restarts and searches it from the Received Messages window.
 - Supports optional Traffic Log panel (off by default).
 - Auto-derives APRS-IS passcode from the source callsign.
 
@@ -125,6 +126,23 @@ In plain terms:
 - Source field = your station callsign/SSID.
 - Message To field = station you want to message (example: WXYO).
 - Digipeater Path field = WIDE path list.
+
+## Message History
+
+Received packets are stored in a SQLite database, `messages.db`, in the app data folder:
+
+- macOS: `~/Library/Application Support/com.jperry.aprswolf/`
+- Linux: `~/.local/share/com.jperry.aprswolf/`
+- Windows: `%APPDATA%\com.jperry.aprswolf\`
+
+What is kept:
+
+- Messages, queries, and bulletins are kept indefinitely.
+- Positions, weather, telemetry, status, objects, items, Mic-E, and acks are removed after 7 days by default. Change this under Preferences > Message History (1 day, 7 days, 30 days, or keep everything). The trim runs at most once an hour while packets arrive.
+
+The windows load the newest 200 at a time. **Load older messages** at the bottom of the Received Messages window fetches the next 200, and the search box there matches callsigns and message text across the whole history.
+
+On first launch after upgrading, the old `received_messages.json` is imported once and renamed to `received_messages.json.migrated`.
 
 ## UI Notes
 

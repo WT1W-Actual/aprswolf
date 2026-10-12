@@ -63,7 +63,8 @@ type ActivityNotice = {
   text: string;
 };
 
-// Matches the backend's MAX_RECEIVED_MESSAGES cap.
+// Matches the backend's PAGE_SIZE: windows hold one page of the message
+// history in memory; older messages stay in the database.
 const MAX_RECEIVED_ITEMS = 200;
 
 function App() {
@@ -311,15 +312,27 @@ function App() {
         settingsLoaded.current = true;
         applySettings(s);
       } catch {/* use defaults */}
-      // Clear persisted received messages and expire old queue entries so each
-      // session starts clean.
+      // Expire old queue entries so each session starts with an empty queue.
       // Also clear the pop-out window state key — if the app crashed while the
       // pop-out was open, the key would be left set and the embedded pane would
       // remain permanently disabled.
       try { window.localStorage.removeItem("aprswolf-received-window-open"); } catch {/* ignore */}
       setReceivedWindowOpen(false);
-      invoke("save_received_messages", { messages: [] }).catch(() => {/* ignore */});
       invoke("clear_queue").catch(() => {/* ignore */});
+      // Received messages persist in the message history; show the newest
+      // page behind anything that arrived while this was loading.
+      try {
+        const stored = await invoke<ReceivedItem[]>("load_received_messages");
+        if (Array.isArray(stored) && stored.length > 0) {
+          setReceivedItems((prev) => {
+            const seen = new Set(prev.map((item) => item.uuid).filter(Boolean));
+            const older = stored
+              .filter((item) => !item.uuid || !seen.has(item.uuid))
+              .map((item) => ({ ...item, id: nextId() }));
+            return [...prev, ...older].slice(0, MAX_RECEIVED_ITEMS);
+          });
+        }
+      } catch {/* no history yet */}
       if (isTauriRuntime) {
         try {
           const status = await invoke<WebServerStatusPayload>("get_web_server_status");
@@ -343,15 +356,6 @@ function App() {
     }, 1000);
     return () => window.clearInterval(timer);
   }, [manualBeaconCooldownSeconds]);
-
-  // Persist received messages (debounced)
-  useEffect(() => {
-    if (!settingsLoaded.current) return;
-    const timer = setTimeout(() => {
-      invoke("save_received_messages", { messages: receivedItems }).catch(() => {/* ignore */});
-    }, 1000);
-    return () => clearTimeout(timer);
-  }, [receivedItems]);
 
   useEffect(() => {
     publishReceivedSnapshot(receivedItems);
@@ -507,6 +511,8 @@ function App() {
           return [
             {
               id: nextId(),
+              uuid: event.payload.uuid,
+              seq: event.payload.seq,
               timestamp: now,
               from,
               to: addressee,

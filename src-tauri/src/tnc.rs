@@ -890,6 +890,20 @@ pub(crate) fn parse_tnc2_protocol_view(line: &str) -> Option<(String, String, Ve
     Some((source, destination, path, info))
 }
 
+/// Store a received packet in the message history, then hand it to the
+/// windows stamped with its stored UUID and sequence.
+fn emit_received(app: &AppHandle, event: ReceivedMessage) {
+    match serde_json::to_value(&event) {
+        Ok(mut value) => {
+            crate::message_store::record_received(app, &mut value);
+            let _ = app.emit("tnc_message", value);
+        }
+        Err(_) => {
+            let _ = app.emit("tnc_message", event);
+        }
+    }
+}
+
 fn parsed_frame_to_received_message(payload: &[u8], parsed: ParsedUiFrame) -> ReceivedMessage {
     let info_text = String::from_utf8_lossy(&parsed.info).to_string();
     let mic_e_text = decode_mic_e(&parsed);
@@ -1048,10 +1062,7 @@ async fn process_agw_frame(
                     }
                 }
                 let event = parsed_frame_to_received_message(ax25_bytes, ax25_payload);
-                if let Ok(value) = serde_json::to_value(&event) {
-                    let _ = crate::settings::append_received_message(app.clone(), value);
-                }
-                let _ = app.emit("tnc_message", event);
+                emit_received(app, event);
                 emit_status(app, "rx_parsed", Some(format!("{} [PARSED OK]", debug_detail)));
             }
             Err(parse_err) => {
@@ -1143,10 +1154,7 @@ async fn process_agw_frame(
                     info: info.as_bytes().to_vec(),
                 };
                 let event = parsed_frame_to_received_message(&[], parsed);
-                if let Ok(value) = serde_json::to_value(&event) {
-                    let _ = crate::settings::append_received_message(app.clone(), value);
-                }
-                let _ = app.emit("tnc_message", event);
+                emit_received(app, event);
             }
             emit_status(app, "rx_parsed", Some(format!("{} [PARSED OK]", debug_detail)));
         } else {
