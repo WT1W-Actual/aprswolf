@@ -244,7 +244,7 @@ export const HELP_SECTIONS: HelpSection[] = [
         type: "callout",
         tone: "info",
         title: "Exporting messages",
-        text: "File > Export Messages... (Cmd+Shift+E on macOS, Ctrl+Shift+E on Windows and Linux) saves sent and received messages, queries, and bulletins to a CSV file, oldest first, hidden ones included. Short-lived packets such as positions and weather are left out. Times are in UTC.",
+        text: "File > Export Messages... (Cmd+Shift+E on macOS, Ctrl+Shift+E on Windows and Linux) opens the Export Messages window. By default it saves sent and received messages, queries, and bulletins to a CSV file, oldest first, hidden ones included. It can narrow the file to sent or received, messages new since the last new-only export, a date range, or some callsigns, and can add positions, weather, and other short-lived packets. Times in the file are in UTC.",
       },
       {
         type: "callout",

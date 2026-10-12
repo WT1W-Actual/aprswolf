@@ -255,7 +255,15 @@ Each opens a dialog with a `Delete from database` box, unchecked by default:
 
 ### Exporting Messages
 
-Choose `File > Export Messages...` (Cmd+Shift+E on macOS, Ctrl+Shift+E on Windows and Linux) and pick where to save. APRSWolf writes a CSV file of your sent messages and received messages, queries, and bulletins, oldest first, hidden ones included, and tells you how many it saved. Positions, weather, and other short-lived packets are left out. The file opens in Numbers, Excel, or LibreOffice; times are in UTC.
+Choose `File > Export Messages...` (Cmd+Shift+E on macOS, Ctrl+Shift+E on Windows and Linux). The Export Messages window opens; click `Export...`, pick where to save, and APRSWolf writes a CSV file and tells you how many messages it saved. The suggested file name ends with the date and time, such as `aprswolf-messages-2026-10-12-143005.csv`, so several exports in one day each get their own file. The file opens in Numbers, Excel, or LibreOffice; times in it are in UTC.
+
+Left as it opens, the window exports your sent messages and received messages, queries, and bulletins, oldest first, hidden ones included. To narrow the file:
+
+- Choose `Sent and received`, `Received only`, or `Sent only`.
+- Check `Only messages new since the last new-only export` to pick up where your last such export stopped. The first one takes everything; one right after it is empty.
+- Check `Limit to a date range` and set From and To. Both days are included.
+- Enter callsigns, separated by commas, to keep messages to or from them. `K6ABC` matches every SSID; `K6ABC-9` matches only that one.
+- Check `Include positions, weather, and other short-lived packets` to add them. APRSWolf warns first that those packets are removed after the retention period set in Preferences, so only the ones still stored are exported.
 
 ### Show ACKs
 

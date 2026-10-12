@@ -67,7 +67,7 @@ This document mirrors the Help window available from inside APRSWolf.
 - Use `Pop Out` to open the Messages window: sent and received in one timeline, with its own search.
 - A packet heard twice, over RF and APRS-IS or through two digipeaters, is listed once.
 - Hover a message and click `×` to clear it, or use `Clear all` beside a pane title to clear what that pane shows. Hold a message for half a second to select several, then click `×` on any selected one. Leave `Delete from database` unchecked to hide them but keep them findable by search, where `↺` puts one back; check it to delete them.
-- `File > Export Messages...` saves sent and received messages, queries, and bulletins to a CSV file for a spreadsheet, hidden ones included.
+- `File > Export Messages...` saves sent and received messages, queries, and bulletins to a CSV file for a spreadsheet, hidden ones included. Its window can narrow the file to sent or received, new since the last new-only export, a date range, or some callsigns, and can add short-lived packets.
 - Leave `Show ACKs` off for everyday use.
 - Use `Traffic Log` when you need a full event history.
 

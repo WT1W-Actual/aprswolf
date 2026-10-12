@@ -49,34 +49,21 @@ async fn open_preferences(app: AppHandle) -> Result<(), String> {
     open_preferences_window(&app).map_err(|e| e.to_string())
 }
 
-/// File > Export Messages: ask where to save, write the CSV, and report
-/// how many messages it holds.
-fn export_messages(app: &AppHandle) {
-    use tauri_plugin_dialog::{DialogExt, MessageDialogKind};
+fn open_export_window(app: &AppHandle) -> tauri::Result<()> {
+    if let Some(window) = app.get_webview_window("export-window") {
+        focus_or_show(window);
+        return Ok(());
+    }
 
-    let app = app.clone();
-    app.dialog()
-        .file()
-        .set_title("Export Messages")
-        .add_filter("CSV", &["csv"])
-        .set_file_name(message_export::default_file_name(std::time::SystemTime::now()))
-        .save_file(move |chosen| {
-            let Some(path) = chosen.and_then(|p| p.into_path().ok()) else {
-                return;
-            };
-            let (kind, text) = match message_store::export_csv(&app, &path) {
-                Ok(count) => (
-                    MessageDialogKind::Info,
-                    format!(
-                        "Exported {count} message{} to {}.",
-                        if count == 1 { "" } else { "s" },
-                        path.display()
-                    ),
-                ),
-                Err(err) => (MessageDialogKind::Error, err),
-            };
-            app.dialog().message(text).title("Export Messages").kind(kind).show(|_| {});
-        });
+    let window = WebviewWindowBuilder::new(app, "export-window", WebviewUrl::App("/#export".into()))
+        .title("Export Messages")
+        .inner_size(520.0, 560.0)
+        .min_inner_size(440.0, 420.0)
+        .resizable(true)
+        .build()?;
+
+    focus_or_show(window);
+    Ok(())
 }
 
 fn open_help_window(app: &AppHandle) -> tauri::Result<()> {
@@ -164,7 +151,7 @@ pub fn run() {
                 let _ = open_help_window(app);
             }
             if event.id().as_ref() == "export-messages" {
-                export_messages(app);
+                let _ = open_export_window(app);
             }
         })
         .plugin(tauri_plugin_opener::init())
@@ -189,6 +176,8 @@ pub fn run() {
             message_store::clear_messages,
             message_store::restore_messages,
             message_store::load_sent_messages,
+            message_store::export_messages,
+            message_store::last_new_only_export,
             tnc::send_beacon,
             webserver::get_web_server_status,
             webserver::enable_web_server,

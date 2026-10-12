@@ -1,9 +1,11 @@
 //! CSV export of the message history.
 //!
-//! The file holds conversation only: sent messages, and received messages,
-//! queries, and bulletins. Short-lived packet types are left out. Rows run
-//! oldest first, sent and received interleaved by time, and hidden messages
-//! are included with `hidden` set so an export is a full copy.
+//! By default the file holds conversation only: sent messages, and received
+//! messages, queries, and bulletins. Short-lived packet types join it only
+//! when the export asks for them. An `ExportFilter` can narrow the file to
+//! sent or received, a date range, some callsigns, or what is new since the
+//! last new-only export. Rows run oldest first, sent and received
+//! interleaved by time, and hidden messages are included with `hidden` set.
 //!
 //! The file is UTF-8 with a byte-order mark, so spreadsheets read accented
 //! text correctly, and uses CRLF line endings with every field quoted
@@ -29,22 +31,48 @@ pub const COLUMNS: [&str; 11] = [
     "hidden",
 ];
 
+const FROM: usize = 3;
+const TO: usize = 4;
+
+/// Which messages an export holds. The default is a full export of
+/// conversation.
+#[derive(Clone, Debug, Default, serde::Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct ExportFilter {
+    /// "sent", "received", or anything else for both.
+    pub direction: String,
+    /// Only messages stored since the last export made with this set.
+    pub new_only: bool,
+    /// Message time bounds in milliseconds: `from_ms` inclusive, `to_ms`
+    /// exclusive. The window turns the chosen local dates into these.
+    pub from_ms: Option<i64>,
+    pub to_ms: Option<i64>,
+    /// A message matches when its sender or addressee is one of these. A
+    /// callsign without an SSID matches every SSID of it.
+    pub callsigns: Vec<String>,
+    /// Add positions, weather, telemetry, and the other short-lived types.
+    pub include_short_lived: bool,
+}
+
 /// One exported message, in `COLUMNS` order.
 struct Row {
     timestamp: i64,
+    stored_at: i64,
     fields: [String; 11],
 }
 
-fn received_rows(conn: &Connection) -> rusqlite::Result<Vec<Row>> {
-    let mut stmt = conn.prepare(
-        "SELECT uuid, timestamp, from_call, to_call, body, aprs_type, data, hidden
-         FROM received WHERE keep = 1",
-    )?;
+fn received_rows(conn: &Connection, include_short_lived: bool) -> rusqlite::Result<Vec<Row>> {
+    let mut stmt = conn.prepare(&format!(
+        "SELECT uuid, timestamp, from_call, to_call, body, aprs_type, data, hidden, stored_at
+         FROM received{}",
+        if include_short_lived { "" } else { " WHERE keep = 1" }
+    ))?;
     let rows = stmt.query_map([], |row| {
         let timestamp: i64 = row.get(1)?;
         let data: Value = serde_json::from_str(&row.get::<_, String>(6)?).unwrap_or(Value::Null);
         Ok(Row {
             timestamp,
+            stored_at: row.get(8)?,
             fields: [
                 row.get(0)?,
                 iso_utc(timestamp),
@@ -64,12 +92,14 @@ fn received_rows(conn: &Connection) -> rusqlite::Result<Vec<Row>> {
 }
 
 fn sent_rows(conn: &Connection) -> rusqlite::Result<Vec<Row>> {
-    let mut stmt =
-        conn.prepare("SELECT uuid, created_at, from_call, to_call, body, path, aprs_id, status, hidden FROM sent")?;
+    let mut stmt = conn.prepare(
+        "SELECT uuid, created_at, from_call, to_call, body, path, aprs_id, status, hidden, stored_at FROM sent",
+    )?;
     let rows = stmt.query_map([], |row| {
         let timestamp: i64 = row.get(1)?;
         Ok(Row {
             timestamp,
+            stored_at: row.get(9)?,
             fields: [
                 row.get(0)?,
                 iso_utc(timestamp),
@@ -86,6 +116,17 @@ fn sent_rows(conn: &Connection) -> rusqlite::Result<Vec<Row>> {
         })
     })?;
     rows.collect()
+}
+
+/// Whether `call` is one of `wanted`, where a wanted callsign without an
+/// SSID matches every SSID of that base call.
+fn callsign_matches(call: &str, wanted: &[String]) -> bool {
+    let call = call.trim().to_ascii_uppercase();
+    let base = call.split('-').next().unwrap_or("");
+    wanted.iter().any(|w| {
+        let w = w.trim().to_ascii_uppercase();
+        !w.is_empty() && (w == call || (!w.contains('-') && w == base))
+    })
 }
 
 /// The digipeater path a received packet travelled. A third-party packet
@@ -127,12 +168,6 @@ fn iso_utc(ms: i64) -> String {
     )
 }
 
-/// `aprswolf-messages-YYYY-MM-DD.csv`, dated in UTC.
-pub fn default_file_name(now: std::time::SystemTime) -> String {
-    let ms = now.duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_millis() as i64);
-    format!("aprswolf-messages-{}.csv", &iso_utc(ms)[..10])
-}
-
 /// A quoted CSV field. Text a spreadsheet would run as a formula (starting
 /// with =, +, -, @, tab, or carriage return) gets a leading apostrophe so it
 /// shows as typed.
@@ -145,11 +180,34 @@ fn field(value: &str) -> String {
     format!("\"{}\"", guarded.replace('"', "\"\""))
 }
 
-/// Write the export to `out`; returns how many messages it holds.
-pub fn write_csv(conn: &Connection, out: &mut impl Write) -> io::Result<usize> {
+/// Write the messages `filter` selects to `out`; returns how many the file
+/// holds. With `new_only` set, a message counts as new when it entered the
+/// store after `since` (every message when there is no earlier mark) and no
+/// later than `until`.
+pub fn write_csv(
+    conn: &Connection,
+    out: &mut impl Write,
+    filter: &ExportFilter,
+    since: Option<i64>,
+    until: i64,
+) -> io::Result<usize> {
     let to_io = |err: rusqlite::Error| io::Error::other(err.to_string());
-    let mut rows = received_rows(conn).map_err(to_io)?;
-    rows.extend(sent_rows(conn).map_err(to_io)?);
+    let mut rows = Vec::new();
+    if filter.direction != "sent" {
+        rows.extend(received_rows(conn, filter.include_short_lived).map_err(to_io)?);
+    }
+    if filter.direction != "received" {
+        rows.extend(sent_rows(conn).map_err(to_io)?);
+    }
+    let wanted: Vec<String> = filter.callsigns.iter().filter(|c| !c.trim().is_empty()).cloned().collect();
+    rows.retain(|row| {
+        (!filter.new_only || (since.is_none_or(|mark| row.stored_at > mark) && row.stored_at <= until))
+            && filter.from_ms.is_none_or(|from| row.timestamp >= from)
+            && filter.to_ms.is_none_or(|to| row.timestamp < to)
+            && (wanted.is_empty()
+                || callsign_matches(&row.fields[FROM], &wanted)
+                || callsign_matches(&row.fields[TO], &wanted))
+    });
     rows.sort_by_key(|row| row.timestamp);
 
     out.write_all("\u{feff}".as_bytes())?;
@@ -192,5 +250,15 @@ mod tests {
         let third_party = serde_json::json!({ "path": ["WIDE1-1"], "protocol_path": ["TCPIP", "WZ0C-4*"] });
         assert_eq!(received_path(&third_party), "TCPIP,WZ0C-4*");
         assert_eq!(received_path(&serde_json::json!({})), "");
+    }
+
+    #[test]
+    fn a_base_callsign_matches_every_ssid() {
+        let wanted = vec!["k6test".to_string(), "N6TEST-7".to_string()];
+        assert!(callsign_matches("K6TEST-9", &wanted));
+        assert!(callsign_matches("K6TEST", &wanted));
+        assert!(callsign_matches("N6TEST-7", &wanted));
+        assert!(!callsign_matches("N6TEST-8", &wanted));
+        assert!(!callsign_matches("K6TESTX", &wanted));
     }
 }

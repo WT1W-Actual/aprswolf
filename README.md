@@ -169,7 +169,17 @@ Each opens a dialog with a **Delete from database** box, unchecked by default. L
 
 ### Exporting messages
 
-**File > Export Messages...** (Cmd+Shift+E on macOS, Ctrl+Shift+E elsewhere) saves your message history as a CSV file that opens in Numbers, Excel, or LibreOffice. It holds sent messages and received messages, queries, and bulletins, oldest first, hidden ones included; positions, weather, and the other short-lived packets are left out. The columns are `uuid`, `timestamp` (ISO 8601, UTC), `direction` (sent or received), `from`, `to`, `body`, `aprs_type`, `path`, `message_number`, `status` (sent messages' delivery status), and `hidden`. Text that starts with `=`, `+`, `-`, or `@` gets a leading apostrophe so a spreadsheet shows it as typed rather than running it as a formula.
+**File > Export Messages...** (Cmd+Shift+E on macOS, Ctrl+Shift+E elsewhere) opens the Export Messages window, then **Export...** saves a CSV file that opens in Numbers, Excel, or LibreOffice. The suggested name, such as `aprswolf-messages-2026-10-12-143005.csv`, ends with the date and time so several exports in a day don't collide.
+
+With nothing changed, the file holds sent messages and received messages, queries, and bulletins, oldest first, hidden ones included. The window can narrow it:
+
+- **Sent and received**, **Received only**, or **Sent only**.
+- **Only messages new since the last new-only export.** New means added to this computer's history since then, so messages imported from elsewhere still count. The first new-only export takes everything, and a second one straight after it is empty. Exports with this box off don't move the mark.
+- **Limit to a date range**, From and To in local time, both days included.
+- **Callsigns**, matched against sender or addressee. A callsign without an SSID matches all of its SSIDs.
+- **Include positions, weather, and other short-lived packets**, off by default. Turning it on warns that those packets are removed after the retention period (7 days by default), so only the ones still stored are exported.
+
+The columns are `uuid`, `timestamp` (ISO 8601, UTC), `direction` (sent or received), `from`, `to`, `body`, `aprs_type`, `path`, `message_number`, `status` (sent messages' delivery status), and `hidden`. Text that starts with `=`, `+`, `-`, or `@` gets a leading apostrophe so a spreadsheet shows it as typed rather than running it as a formula.
 
 ## APRS And AX.25 Behavior
 
