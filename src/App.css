@@ -1821,6 +1821,13 @@ button.danger {
 
 .help-search input {
   min-width: 240px;
+  height: 26px;
+}
+
+/* The search caption sits above its box, so centering the button on the
+   whole row lifted it above the box; seat it on the box's line instead. */
+.help-window-toolbar .received-window-close {
+  align-self: flex-end;
 }
 
 .help-window-body {
