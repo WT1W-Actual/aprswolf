@@ -66,6 +66,10 @@ type ActivityNotice = {
 // Matches the backend's PAGE_SIZE: windows hold one page of the message
 // history in memory; older messages stay in the database.
 const MAX_RECEIVED_ITEMS = 200;
+// Shown as the tooltip on the window's title; it never changes, so it no
+// longer takes a panel of its own.
+const APP_TAGLINE =
+  "Control Center: operate APRSWolf from one place. Use this window for live connections, messaging, beacons, and traffic review. Open Preferences for saved station, transport, and remote-control settings.";
 
 function App() {
   const isTauriRuntime = Boolean((globalThis as { isTauri?: boolean }).isTauri);
@@ -855,6 +859,14 @@ function App() {
     }
   }
 
+  async function openPreferences() {
+    try {
+      await invoke("open_preferences");
+    } catch (e) {
+      pushLog("error", `preferences window failed: ${String(e)}`);
+    }
+  }
+
   async function openLogWindow() {
     try {
       const { WebviewWindow } = await import("@tauri-apps/api/webviewWindow");
@@ -1026,8 +1038,8 @@ function App() {
   const tncConfigured = Boolean(source.trim() && host.trim() && port.trim());
   const aprsisConfigured = Boolean(source.trim() && aprsisHost.trim() && aprsisPort.trim() && aprsisPasscode.trim());
   const remoteSummary = webServerPort.trim()
-    ? `Port ${webServerPort.trim()}${webServerAutoStart ? " • auto-start on" : " • auto-start off"}`
-    : "Set a remote web port in Preferences.";
+    ? `port ${webServerPort.trim()} · auto-start ${webServerAutoStart ? "on" : "off"}`
+    : "no port set";
   const needsPreferencesSetup = !source.trim() || (!tncConfigured && !aprsisConfigured);
   const dashboardStatus = aprsisConnected
     ? "APRS-IS session is active."
@@ -1038,12 +1050,24 @@ function App() {
         : "Choose a transport and connect when ready.";
   return (
     <main className="app">
-      <header className="header-centered">
+      <header className="app-header">
         <img src={aprsWolfLogo} alt="APRSWolf logo" className="app-logo" />
-        <h1>APRSWolf</h1>
+        <h1 title={APP_TAGLINE}>APRSWolf</h1>
         <span className="app-version" aria-label={`Application version ${appVersion}`}>
           {appVersion}
         </span>
+        <p className="header-status" aria-live="polite">{dashboardStatus}</p>
+        <button type="button" className="log-window-btn" onClick={openLogWindow}>Traffic Log ↗</button>
+        <button
+          type="button"
+          className="settings-btn"
+          onClick={openPreferences}
+          title="Preferences"
+          aria-label="Open Preferences"
+          disabled={!isTauriRuntime}
+        >
+          ⚙︎
+        </button>
       </header>
 
       {uiLocked ? (
@@ -1054,93 +1078,16 @@ function App() {
         </section>
       ) : null}
 
-      <section className="panel dashboard-hero-panel">
-        <div className="dashboard-hero-copy">
-          <p className="dashboard-kicker">Control Center</p>
-          <h2 className="dashboard-title">Operate APRSWolf from one place.</h2>
-          <p className="dashboard-body">
-            Use this window for live connections, messaging, beacons, and traffic review. Open Preferences for saved station, transport, and remote-control settings.
-          </p>
-          <p className="dashboard-status" aria-live="polite">{dashboardStatus}</p>
-          {needsPreferencesSetup ? (
-            <div className="dashboard-onboarding" aria-live="polite">
-              <strong>First run:</strong> Open Preferences to configure your station callsign and at least one connection path before trying to connect.
-            </div>
-          ) : null}
+      {needsPreferencesSetup ? (
+        <div className="dashboard-onboarding" aria-live="polite">
+          <strong>First run:</strong> Open Preferences to configure your station callsign and at least one connection path before trying to connect.
         </div>
-        <div className="dashboard-hero-actions">
-          <button type="button" className="secondary" onClick={openLogWindow}>Traffic Log ↗</button>
-        </div>
-      </section>
-
-      <section className="panel web-server-panel">
-        <div className="web-server-head">
-          <div>
-            <h2 className="section-title">Remote Web Control</h2>
-            <p className="web-server-copy">
-              Enable a dedicated control server in your browser. While it is active, desktop controls remain visible but locked until you disable remote control here or from the browser page.
-            </p>
-            <p className="settings-summary-note">{remoteSummary}</p>
-          </div>
-          <span className={`status status-text ${webServerEnabled ? "ok" : "off"}`}>
-            {webServerEnabled ? "Remote On" : "Remote Off"}
-          </span>
-        </div>
-        <div className="web-server-controls">
-          <div className="config-buttons web-server-buttons">
-            <button type="button" onClick={enableWebServer} disabled={uiLocked || webServerEnabled || !webServerPort.trim()}>Enable Remote</button>
-            <button type="button" className="secondary" onClick={disableWebServer} disabled={uiLocked || !webServerEnabled}>Disable Remote</button>
-            <button type="button" className="secondary" onClick={openRemoteWebUi} disabled={!webServerEnabled || !webServerUrl}>Open Remote UI</button>
-          </div>
-        </div>
-        {webServerEnabled && webServerUrl ? (
-          <p className="web-server-url">
-            <span>Remote URL: </span>
-            <a href={webServerUrl} onClick={(e) => { e.preventDefault(); openRemoteWebUi(); }}>{webServerUrl}</a>
-          </p>
-        ) : null}
-        {webServerEnabled ? <p className="web-server-lock-note">Desktop controls are locked while remote control is enabled.</p> : null}
-      </section>
+      ) : null}
 
       <fieldset className="runtime-fieldset" disabled={controlsLocked}>
-
-      <section className="panel config-row">
-        <div className="config-group">
-          <h2 className="section-title">Station</h2>
-          <div className="config-buttons">
-              <button type="button" onClick={sendBeacon} disabled={!canSend || !beaconConfigured || manualBeaconCooldownSeconds > 0}>
-                Beacon
-              </button>
-              {manualBeaconCooldownSeconds > 0 ? (
-                <span className="beacon-cooldown" aria-live="polite">{beaconCooldownLabel}</span>
-              ) : null}
-          </div>
-        </div>
-        <div className="config-sep" />
-        <div className="config-group">
-          <h2 className="section-title">TNC (Dire Wolf)</h2>
-          <div className="config-buttons">
-            <button type="button" onClick={connect} disabled={!tncConfigured || tncSessionActive || tncBlockedByAprsis}>Connect TNC</button>
-            <button type="button" onClick={disconnect} disabled={!tncSessionActive}>Disconnect</button>
-            <button type="button" onClick={clearQueue}>Clear Q</button>
-            <button type="button" onClick={dumpQueue}>Dump Q</button>
-          </div>
-        </div>
-        <div className="config-sep" />
-        <div className="config-group">
-          <h2 className="section-title">APRS-IS</h2>
-          <p className="aprsis-filter-note">Direct APRS-IS sends ignore the RF path field; WIDE paths are only used on TNC/RF sends.</p>
-          <div className="config-buttons">
-            <button type="button" onClick={connectAprsIs} disabled={!aprsisConfigured || aprsisConnected || aprsisBlockedByTnc}>Connect APRS-IS</button>
-            <button type="button" onClick={disconnectAprsIs} disabled={!aprsisConnected}>Disconnect</button>
-          </div>
-        </div>
-        <p className="connection-note-inline">TNC &amp; APRS-IS are mutually exclusive.</p>
-      </section>
-
-      <section className="panel">
-        <form className="grid two" onSubmit={send}>
-          <label>
+      <section className="panel compose-panel">
+        <form className="compose-bar" onSubmit={send}>
+          <label className="compose-to">
             Message To
             <input
               value={destination}
@@ -1148,7 +1095,7 @@ function App() {
               placeholder="WXYO"
             />
           </label>
-          <label>
+          <label className="compose-message">
             Message
             <input
               value={message}
@@ -1164,111 +1111,107 @@ function App() {
         {!canSend ? <p className="compose-help">Connect TNC or APRS-IS to enable message sending.</p> : null}
       </section>
 
-      <div className="messages-scroll-region">
-        <div className="actions-bar">
-          <button type="button" className="log-window-btn" onClick={openLogWindow}>
-            Traffic Log ↗
-          </button>
+      {activityNotice ? (
+        <div className={`activity-strip activity-${activityNotice.kind}`} aria-live="polite">
+          <span className="activity-dot" />
+          <span className="activity-text">{activityNotice.text}</span>
         </div>
+      ) : null}
 
-        {activityNotice ? (
-          <div className={`activity-strip activity-${activityNotice.kind}`} aria-live="polite">
-            <span className="activity-dot" />
-            <span className="activity-text">{activityNotice.text}</span>
-          </div>
-        ) : null}
-
-        <section className="panel messages-panel">
-          <div className="msg-pane">
+      <section className="panel messages-panel">
+        <div className="msg-pane">
+          <div className="msg-pane-header">
             <h2>Sent Messages</h2>
-            <div className="msg-list">
-              {sentItems.length === 0 ? <p className="empty">No sent messages.</p> : null}
-              {sentItems.map((item) => (
-                <div key={item.id} className={`msg-item sent-item status-${item.status}`}>
-                  <div className="msg-item-top-row">
-                    <span className="msg-time">{new Date(item.timestamp).toLocaleTimeString()}</span>
-                    <span className="msg-addr">▶ {item.destination}</span>
-                    <span className={`msg-badge ${item.status}`}>{item.status}</span>
-                  </div>
-                  <div className="msg-body">{item.body}</div>
-                </div>
-              ))}
-            </div>
           </div>
-          <div className="msg-pane">
-            <div className="msg-pane-header">
-              <h2>Received Messages</h2>
+          <div className="msg-list">
+            {sentItems.length === 0 ? <p className="empty">No sent messages.</p> : null}
+            {sentItems.map((item) => (
+              <div key={item.id} className={`msg-item sent-item status-${item.status}`}>
+                <div className="msg-item-top-row">
+                  <span className="msg-time">{new Date(item.timestamp).toLocaleTimeString()}</span>
+                  <span className="msg-addr">▶ {item.destination}</span>
+                  <span className={`msg-badge ${item.status}`}>{item.status}</span>
+                </div>
+                <div className="msg-body">{item.body}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+        <div className="msg-pane">
+          <div className="msg-pane-header">
+            <h2>Received Messages</h2>
+            <button type="button" className="log-window-btn" onClick={openReceivedWindow}>
+              {receivedWindowOpen ? "Focus Pop-Out ↗" : "Pop Out ↗"}
+            </button>
+          </div>
+          {receivedWindowOpen ? (
+            <div className="msg-popout-disabled" aria-live="polite">
+              <p className="msg-popout-disabled-copy">
+                Received messages are active in the popped-out window. This embedded pane is disabled until that window closes.
+              </p>
               <button type="button" className="log-window-btn" onClick={openReceivedWindow}>
-                {receivedWindowOpen ? "Focus Pop-Out ↗" : "Pop Out ↗"}
+                Bring Pop-Out Forward
               </button>
             </div>
-            {receivedWindowOpen ? (
-              <div className="msg-popout-disabled" aria-live="polite">
-                <p className="msg-popout-disabled-copy">
-                  Received messages are active in the popped-out window. This embedded pane is disabled until that window closes.
-                </p>
-                <button type="button" className="log-window-btn" onClick={openReceivedWindow}>
-                  Bring Pop-Out Forward
-                </button>
+          ) : (
+            <>
+              <div className="rx-filter-meta">
+                <label className="inline-toggle rx-filter-toggle">
+                  <input
+                    type="checkbox"
+                    checked={promiscuousBaseCallsign}
+                    onChange={(event) => setPromiscuousBaseCallsign(event.currentTarget.checked)}
+                  />
+                  Promiscuous Base-Call
+                </label>
               </div>
-            ) : (
-              <>
-                <div className="rx-filter-meta">
-                  <p className="rx-filter-help">
-                    Select one or more filters. "Messages" shows all APRS message frames. "To Me" only shows traffic addressed to your station.
+              <div
+                className="rx-filter-bar"
+                role="group"
+                aria-label="Received message filters"
+                title={'Select one or more filters. "Messages" shows all APRS message frames. "To Me" only shows traffic addressed to your station.'}
+              >
+                {FILTER_OPTIONS.map(({ key, label }) => (
+                  <button
+                    key={key}
+                    type="button"
+                    className={`rx-filter-btn ${activeReceivedFilters.includes(key) ? "active" : ""}`}
+                    onClick={() => toggleReceivedFilter(key)}
+                    aria-pressed={activeReceivedFilters.includes(key)}
+                  >
+                    {label} <span className="rx-filter-count">{filterCounts[key]}</span>
+                  </button>
+                ))}
+              </div>
+              <div className="msg-list">
+                {filteredReceived.length === 0 ? (
+                  <p className="empty">
+                    {activeReceivedFilters.includes("to_me") && activeReceivedFilters.length === 1
+                      ? "No messages addressed to you."
+                      : "No received messages for this filter."}
                   </p>
-                  <label className="inline-toggle rx-filter-toggle">
-                    <input
-                      type="checkbox"
-                      checked={promiscuousBaseCallsign}
-                      onChange={(event) => setPromiscuousBaseCallsign(event.currentTarget.checked)}
-                    />
-                    Promiscuous Base-Call
-                  </label>
-                </div>
-                <div className="rx-filter-bar" role="group" aria-label="Received message filters">
-                  {FILTER_OPTIONS.map(({ key, label }) => (
-                    <button
-                      key={key}
-                      type="button"
-                      className={`rx-filter-btn ${activeReceivedFilters.includes(key) ? "active" : ""}`}
-                      onClick={() => toggleReceivedFilter(key)}
-                      aria-pressed={activeReceivedFilters.includes(key)}
-                    >
-                      {label} <span className="rx-filter-count">{filterCounts[key]}</span>
-                    </button>
-                  ))}
-                </div>
-                <div className="msg-list">
-                  {filteredReceived.length === 0 ? (
-                    <p className="empty">
-                      {activeReceivedFilters.includes("to_me") && activeReceivedFilters.length === 1
-                        ? "No messages addressed to you."
-                        : "No received messages for this filter."}
-                    </p>
-                  ) : null}
-                  {filteredReceived.map((item) => (
-                    <button
-                      key={item.id}
-                      type="button"
-                      className="msg-item recv-item recv-clickable"
-                      onClick={() => openReplyDialog(item)}
-                    >
-                      <div className="msg-item-top-row">
-                        <span className="msg-time">{new Date(item.timestamp).toLocaleTimeString()}</span>
-                        <span className="msg-addr">◀ {item.from}</span>
-                        {item.aprsType && item.aprsType !== "other" ? <span className="msg-type-badge">{item.aprsType}</span> : null}
-                        {item.micEDecoded ? <span className="mic-e-inline-badge">Mic-E</span> : null}
-                      </div>
-                      <div className="msg-body">{item.body}</div>
-                    </button>
-                  ))}
-                </div>
-              </>
-            )}
-          </div>
-        </section>
-      </div>
+                ) : null}
+                {filteredReceived.map((item) => (
+                  <button
+                    key={item.id}
+                    type="button"
+                    className="msg-item recv-item recv-clickable"
+                    onClick={() => openReplyDialog(item)}
+                  >
+                    <div className="msg-item-top-row">
+                      <span className="msg-time">{new Date(item.timestamp).toLocaleTimeString()}</span>
+                      <span className="msg-addr">◀ {item.from}</span>
+                      {item.aprsType && item.aprsType !== "other" ? <span className="msg-type-badge">{item.aprsType}</span> : null}
+                      {item.micEDecoded ? <span className="mic-e-inline-badge">Mic-E</span> : null}
+                    </div>
+                    <div className="msg-body">{item.body}</div>
+                  </button>
+                ))}
+              </div>
+            </>
+          )}
+        </div>
+      </section>
 
       {replyOpen ? (
         <div className="reply-overlay" role="dialog" aria-modal="true" aria-label="Reply to message">
@@ -1302,8 +1245,92 @@ function App() {
         </div>
       ) : null}
       </fieldset>
+
+      <section className="panel control-box" aria-label="Connections and remote control">
+        <div className="config-group">
+          <div className="config-head">
+            <h2 className="section-title">
+              <StatusDot on={isConnected || aprsisConnected} label={isConnected || aprsisConnected ? "Station on the air" : "Station off the air"} />
+              Station
+            </h2>
+            <span className="config-meta">{source.trim() || "no callsign set"}</span>
+          </div>
+          <div className="config-buttons">
+            <button type="button" onClick={sendBeacon} disabled={controlsLocked || !canSend || !beaconConfigured || manualBeaconCooldownSeconds > 0}>
+              Beacon
+            </button>
+            {manualBeaconCooldownSeconds > 0 ? (
+              <span className="beacon-cooldown" aria-live="polite">{beaconCooldownLabel}</span>
+            ) : null}
+          </div>
+        </div>
+        <div className="config-sep" />
+        <div className="config-group">
+          <div className="config-head">
+            <h2 className="section-title" title={TNC_TIP}>
+              <StatusDot on={isConnected} label={isConnected ? "TNC connected" : "TNC disconnected"} />
+              TNC (Dire Wolf)
+            </h2>
+            <span className="config-meta">{host.trim() && port.trim() ? `${host.trim()}:${port.trim()}` : "not set"}</span>
+          </div>
+          <div className="config-buttons">
+            <button type="button" onClick={connect} disabled={controlsLocked || !tncConfigured || tncSessionActive || tncBlockedByAprsis}>Connect TNC</button>
+            <button type="button" onClick={disconnect} disabled={controlsLocked || !tncSessionActive}>Disconnect</button>
+            <button type="button" onClick={clearQueue} disabled={controlsLocked}>Clear Q</button>
+            <button type="button" onClick={dumpQueue} disabled={controlsLocked}>Dump Q</button>
+          </div>
+        </div>
+        <div className="config-sep" />
+        <div className="config-group">
+          <div className="config-head">
+            <h2 className="section-title" title={APRSIS_TIP}>
+              <StatusDot on={aprsisConnected} label={aprsisConnected ? "APRS-IS connected" : "APRS-IS disconnected"} />
+              APRS-IS
+            </h2>
+            <span className="config-meta">{aprsisHost.trim() && aprsisPort.trim() ? `${aprsisHost.trim()}:${aprsisPort.trim()}` : "not set"}</span>
+          </div>
+          <div className="config-buttons">
+            <button type="button" onClick={connectAprsIs} disabled={controlsLocked || !aprsisConfigured || aprsisConnected || aprsisBlockedByTnc}>Connect APRS-IS</button>
+            <button type="button" onClick={disconnectAprsIs} disabled={controlsLocked || !aprsisConnected}>Disconnect</button>
+          </div>
+        </div>
+        <div className="config-sep" />
+        <div
+          className="config-group remote-group"
+          title="Runs a control page you can open in a browser. While it is on, the desktop controls stay visible but locked until you disable remote control here or from the browser page."
+        >
+          <div className="config-head">
+            <h2 className="section-title">
+              <StatusDot on={webServerEnabled} label={webServerEnabled ? "Remote control on" : "Remote control off"} />
+              Remote Web Control
+            </h2>
+            {webServerEnabled && webServerUrl ? (
+              <a className="config-meta" href={webServerUrl} onClick={(e) => { e.preventDefault(); openRemoteWebUi(); }}>{webServerUrl}</a>
+            ) : (
+              <span className="config-meta">{remoteSummary}</span>
+            )}
+          </div>
+          <div className="config-buttons">
+            <button type="button" onClick={enableWebServer} disabled={uiLocked || webServerEnabled || !webServerPort.trim()}>Enable Remote</button>
+            <button type="button" className="secondary" onClick={disableWebServer} disabled={uiLocked || !webServerEnabled}>Disable Remote</button>
+            <button type="button" className="secondary" onClick={openRemoteWebUi} disabled={!webServerEnabled || !webServerUrl}>Open Remote UI</button>
+          </div>
+          {webServerEnabled ? <p className="web-server-lock-note">Desktop controls are locked while remote control is enabled.</p> : null}
+        </div>
+      </section>
     </main>
   );
+}
+
+const TNC_TIP =
+  "TNC and APRS-IS are mutually exclusive: connect one at a time. TNC sends go out over RF and use the WIDE digi path.";
+const APRSIS_TIP =
+  "TNC and APRS-IS are mutually exclusive: connect one at a time. Direct APRS-IS sends ignore the RF digi path; WIDE paths are only used on TNC/RF sends.";
+
+function StatusDot({ on, label }: { on: boolean; label: string }) {
+  // Hidden from the accessible name so headings read as their titles; the
+  // hover tooltip carries the state.
+  return <span className={`status-dot ${on ? "on" : "off"}`} aria-hidden="true" title={label} />;
 }
 
 export default App;

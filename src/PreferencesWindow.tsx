@@ -35,6 +35,27 @@ const EMPTY_SETTINGS: AppSettingsPayload = {
   msg_font_size: 15,
 };
 
+// Grow or shrink the window so every section shows without scrolling,
+// capped at the screen's usable height (the title bar sits outside it).
+async function fitWindowToContent() {
+  if (!(globalThis as { isTauri?: boolean }).isTauri) return;
+  const toolbar = document.querySelector<HTMLElement>(".preferences-window-toolbar");
+  const form = document.querySelector<HTMLElement>(".preferences-window-body");
+  if (!toolbar || !form) return;
+  const TITLE_BAR = 32;
+  const PADDING_AND_GAP = 30;
+  const wanted = toolbar.offsetHeight + form.scrollHeight + PADDING_AND_GAP;
+  const height = Math.min(wanted, window.screen.availHeight - TITLE_BAR);
+  try {
+    const { getCurrentWindow, LogicalSize } = await import("@tauri-apps/api/window");
+    const win = getCurrentWindow();
+    await win.setSize(new LogicalSize(window.innerWidth, height));
+    await win.center();
+  } catch {
+    // Keep the opening size if the window can't be resized.
+  }
+}
+
 function PreferencesWindow() {
   const [settings, setSettings] = useState<AppSettingsPayload>(EMPTY_SETTINGS);
   const [saveState, setSaveState] = useState<"idle" | "saved" | "error">("idle");
@@ -42,6 +63,7 @@ function PreferencesWindow() {
   // Tracks the last passcode this window derived itself, so callsign edits
   // only auto-derive when the user hasn't typed a manual passcode.
   const lastDerivedPasscode = useRef("");
+  const [loaded, setLoaded] = useState(false);
 
   useEffect(() => {
     let mounted = true;
@@ -62,12 +84,19 @@ function PreferencesWindow() {
         if (!mounted) return;
         setSettings(EMPTY_SETTINGS);
       }
+      setLoaded(true);
     })();
 
     return () => {
       mounted = false;
     };
   }, []);
+
+  useEffect(() => {
+    if (!loaded) return;
+    const frame = requestAnimationFrame(() => { void fitWindowToContent(); });
+    return () => cancelAnimationFrame(frame);
+  }, [loaded]);
 
   useEffect(() => {
     const media = window.matchMedia("(prefers-color-scheme: dark)");
@@ -200,6 +229,14 @@ function PreferencesWindow() {
     }
   }
 
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape" && !event.defaultPrevented) void closeWindow();
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, []);
+
   async function closeWindow() {
     try {
       const { getCurrentWindow } = await import("@tauri-apps/api/window");
@@ -224,7 +261,7 @@ function PreferencesWindow() {
       </div>
 
       <form id="preferences-form" className="preferences-window-body" onSubmit={savePreferences}>
-        <section className="panel preferences-panel">
+        <section className="panel preferences-panel prefs-station">
           <h2 className="section-title">Station</h2>
           <div className="preferences-grid preferences-grid-three">
             <label>
@@ -292,7 +329,7 @@ function PreferencesWindow() {
           </div>
         </section>
 
-        <section className="panel preferences-panel">
+        <section className="panel preferences-panel prefs-tnc">
           <h2 className="section-title">TNC (Dire Wolf)</h2>
           <div className="preferences-grid preferences-grid-two">
             <label>
@@ -316,7 +353,7 @@ function PreferencesWindow() {
           </div>
         </section>
 
-        <section className="panel preferences-panel">
+        <section className="panel preferences-panel prefs-aprsis">
           <h2 className="section-title">APRS-IS</h2>
           <div className="preferences-grid preferences-grid-four">
             <label>
@@ -363,7 +400,7 @@ function PreferencesWindow() {
           <p className="aprsis-filter-note">Optional. Enter only filter terms, not #filter. Examples: m/50, r/42.36/-71.06/25, t/WT1W.</p>
         </section>
 
-        <section className="panel preferences-panel">
+        <section className="panel preferences-panel prefs-beacon">
           <h2 className="section-title">Beacon</h2>
           <div className="preferences-grid preferences-grid-three">
             <label>
@@ -426,7 +463,7 @@ function PreferencesWindow() {
           </div>
         </section>
 
-        <section className="panel preferences-panel">
+        <section className="panel preferences-panel prefs-history">
           <h2 className="section-title">Message History</h2>
           <label>
             Keep positions, weather and other short-lived packets for
@@ -444,7 +481,7 @@ function PreferencesWindow() {
           </label>
         </section>
 
-        <section className="panel preferences-panel">
+        <section className="panel preferences-panel prefs-remote">
           <h2 className="section-title">Remote Web Control</h2>
           <div className="preferences-grid preferences-grid-two">
             <label>

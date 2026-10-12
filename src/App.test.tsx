@@ -9,6 +9,7 @@ import { publishUiLog } from "./logBus";
 import packageJson from "../package.json";
 
 const invokeMock = vi.fn() as any;
+const destroyWindowMock = vi.fn();
 const listenMock = vi.fn() as any;
 const getVersionMock = vi.fn() as any;
 const openUrlMock = vi.fn() as any;
@@ -52,7 +53,7 @@ vi.mock("@tauri-apps/plugin-opener", () => ({
 }));
 
 vi.mock("@tauri-apps/api/window", () => ({
-  getCurrentWindow: () => ({ destroy: vi.fn() }),
+  getCurrentWindow: () => ({ destroy: destroyWindowMock }),
 }));
 
 beforeEach(() => {
@@ -161,7 +162,10 @@ describe("App", () => {
   it("renders initial disconnected state and disabled send", async () => {
     render(<App />);
 
-    expect(await screen.findByText(/tnc & aprs-is are mutually exclusive/i)).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "TNC (Dire Wolf)" })).toHaveAttribute(
+      "title",
+      expect.stringMatching(/mutually exclusive/i),
+    );
     const expectedVersion = String(packageJson.displayVersion ?? packageJson.version);
     expect(screen.getByLabelText(new RegExp(`application version v${expectedVersion}`, "i"))).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Send" })).toBeDisabled();
@@ -179,9 +183,10 @@ describe("App", () => {
   it("shows APRS-IS filter and path guidance", async () => {
     render(<App />);
 
-    expect(
-      screen.getByText(/direct aprs-is sends ignore the rf path field; wide paths are only used on tnc\/rf sends/i),
-    ).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "APRS-IS" })).toHaveAttribute(
+      "title",
+      expect.stringMatching(/direct aprs-is sends ignore the rf digi path; wide paths are only used on tnc\/rf sends/i),
+    );
   });
 
   it("recovers from a stale pop-out state key left by a crash", async () => {
@@ -208,6 +213,13 @@ describe("App", () => {
       await screen.findByText(/received messages are active in the popped-out window/i),
     ).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /bring pop-out forward/i })).toBeInTheDocument();
+  });
+
+  it("opens Preferences from the header gear button", async () => {
+    render(<App />);
+    fireEvent.click(await screen.findByRole("button", { name: "Open Preferences" }));
+
+    expect(invokeMock).toHaveBeenCalledWith("open_preferences", undefined);
   });
 
   it("invokes connect_tnc when Connect is clicked", async () => {
@@ -1003,6 +1015,16 @@ describe("App", () => {
 });
 
 describe("PreferencesWindow", () => {
+  it("closes the window when Escape is pressed", async () => {
+    destroyWindowMock.mockClear();
+    render(<PreferencesWindow />);
+    await screen.findByRole("heading", { name: "Station" });
+
+    fireEvent.keyDown(window, { key: "Escape" });
+
+    await waitFor(() => expect(destroyWindowMock).toHaveBeenCalled());
+  });
+
   it("loads blank first-run fields and saves normalized preferences", async () => {
     invokeMock.mockImplementation((cmd: string, payload?: any) => {
       if (cmd === "load_settings") {
