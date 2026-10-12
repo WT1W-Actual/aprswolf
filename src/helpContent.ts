@@ -243,6 +243,12 @@ export const HELP_SECTIONS: HelpSection[] = [
       {
         type: "callout",
         tone: "info",
+        title: "Exporting messages",
+        text: "File > Export Messages... (Cmd+Shift+E on macOS, Ctrl+Shift+E on Windows and Linux) saves sent and received messages, queries, and bulletins to a CSV file, oldest first, hidden ones included. Short-lived packets such as positions and weather are left out. Times are in UTC.",
+      },
+      {
+        type: "callout",
+        tone: "info",
         title: "Received Message Filters",
         text: "The filter bar appears above Received Messages. All returns the full list. To Me follows your station callsign, Messages shows every APRS message frame, and Promiscuous Base-Call expands To Me to include your base call without the SSID.",
       },

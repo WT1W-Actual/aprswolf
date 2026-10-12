@@ -246,7 +246,7 @@ fn is_conversation(aprs_type: &str, is_bulletin: bool, body: &str) -> bool {
 /// The APRS message number (`{12`, or `{12}34` with a reply-ack) of a
 /// message packet, read from the raw info field since the stored body has
 /// it stripped.
-fn message_number(message: &Value) -> Option<&str> {
+pub(crate) fn message_number(message: &Value) -> Option<&str> {
     let raw = text_field(message, "protocol_info_text").or_else(|| text_field(message, "info_text"))?;
     let info = crate::settings::unwrap_third_party_info(raw).unwrap_or(raw).trim();
     let text = info.strip_prefix(':')?.get(10..)?;
@@ -686,6 +686,16 @@ pub fn search_sent_messages(
     with_store(&app, |store| search_sent(&store.conn, &query, before_seq, limit).map_err(|err| err.to_string()))
 }
 
+/// Write the conversation history to a CSV file at `path`; returns how many
+/// messages it holds.
+pub fn export_csv(app: &AppHandle, path: &Path) -> Result<usize, String> {
+    with_store(app, |store| {
+        let file = std::fs::File::create(path).map_err(|err| format!("could not create {}: {err}", path.display()))?;
+        let mut out = std::io::BufWriter::new(file);
+        crate::message_export::write_csv(&store.conn, &mut out).map_err(|err| format!("export failed: {err}"))
+    })
+}
+
 /// The newest page of history, for the web remote's state snapshot.
 pub fn recent(app: &AppHandle) -> Vec<Value> {
     with_store(app, |store| page(&store.conn, None, PAGE_SIZE).map_err(|err| err.to_string())).unwrap_or_default()
@@ -1015,6 +1025,30 @@ mod tests {
         assert_eq!(bodies, vec!["_10111213c220s004", "hello"]);
 
         assert_eq!(prune(&conn, 0, 100 * day).unwrap(), 0);
+    }
+
+    #[test]
+    fn export_writes_conversation_oldest_first_with_hidden_rows() {
+        let conn = memory_db();
+        record(&conn, &message("N6TEST-7", Some("AD6DM-15"), "=SUM(A1)", "msg"), 1_000).unwrap();
+        record(&conn, &message("N7TEST-9", None, "!3830.00N/12130.00W>", "pos"), 2_000).unwrap();
+        record(&conn, &message("N6TEST-7", Some("AD6DM-15"), "ack12", "msg"), 3_000).unwrap();
+        upsert_sent(&conn, &sent("s-1", "N6TEST-7", "acked", 1), 4_000).unwrap();
+        let (hidden, _) = record(&conn, &message("W6TEST-1", Some("BLN1"), "Net tonight, 1930", "msg"), 5_000).unwrap();
+        clear(&conn, MessageList::Received, &[hidden], false).unwrap();
+
+        let mut out = Vec::new();
+        assert_eq!(crate::message_export::write_csv(&conn, &mut out).unwrap(), 3);
+        let text = String::from_utf8(out).unwrap();
+        assert!(text.starts_with('\u{feff}'));
+        let lines: Vec<&str> = text.trim_start_matches('\u{feff}').split("\r\n").filter(|l| !l.is_empty()).collect();
+        assert_eq!(lines.len(), 4);
+        assert!(lines[0].starts_with("\"uuid\",\"timestamp\",\"direction\""));
+        assert!(lines[1].contains("\"received\",\"N6TEST-7\",\"AD6DM-15\",\"'=SUM(A1)\""));
+        assert!(lines[2].contains("\"sent\""));
+        assert!(lines[2].contains("\"acked\""));
+        assert!(lines[3].contains("\"Net tonight, 1930\""));
+        assert!(lines[3].ends_with("\"yes\""));
     }
 
     #[test]

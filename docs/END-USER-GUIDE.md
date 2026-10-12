@@ -253,6 +253,10 @@ Each opens a dialog with a `Delete from database` box, unchecked by default:
 - Unchecked: the messages leave the list but stay in the database. Search still finds them, marked `HIDDEN`, and `↺` beside a hidden result puts it back in its list.
 - Checked: the messages are deleted and no search finds them.
 
+### Exporting Messages
+
+Choose `File > Export Messages...` (Cmd+Shift+E on macOS, Ctrl+Shift+E on Windows and Linux) and pick where to save. APRSWolf writes a CSV file of your sent messages and received messages, queries, and bulletins, oldest first, hidden ones included, and tells you how many it saved. Positions, weather, and other short-lived packets are left out. The file opens in Numbers, Excel, or LibreOffice; times are in UTC.
+
 ### Show ACKs
 
 The `Show ACKs` checkbox controls whether APRS ACK frames appear in the received list.

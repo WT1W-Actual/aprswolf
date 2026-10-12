@@ -118,6 +118,7 @@ The [End User Guide](docs/END-USER-GUIDE.md) walks through the rest.
 - Keeps sent and received messages in a local database across restarts, and searches all of it from one search field.
 - Stores a packet heard twice (over RF and APRS-IS, or through two digipeaters) only once.
 - Lets you hide or delete messages one at a time, as a selection, or everything a list shows.
+- Exports your message history to a CSV file for a spreadsheet.
 - Shows an unread count for messages addressed to you on the To Me filter, and on the app icon while APRSWolf is in the background.
 - Shows UTC and local time in the header.
 - Opens a separate Messages window with sent and received in one timeline, and a Traffic Log window with every raw packet and event.
@@ -165,6 +166,10 @@ On first launch after upgrading, the old `received_messages.json` is imported on
 - To clear several at once, hold a message for half a second. A checkbox appears on every message; check the ones you want, then click **×** on any checked message. **Done** or Escape leaves selection.
 
 Each opens a dialog with a **Delete from database** box, unchecked by default. Left unchecked, the messages leave the list but stay in the database, and search still finds them marked **HIDDEN**. Click **↺** beside a hidden result to put it back in its list. Checked, they are deleted and no search finds them.
+
+### Exporting messages
+
+**File > Export Messages...** (Cmd+Shift+E on macOS, Ctrl+Shift+E elsewhere) saves your message history as a CSV file that opens in Numbers, Excel, or LibreOffice. It holds sent messages and received messages, queries, and bulletins, oldest first, hidden ones included; positions, weather, and the other short-lived packets are left out. The columns are `uuid`, `timestamp` (ISO 8601, UTC), `direction` (sent or received), `from`, `to`, `body`, `aprs_type`, `path`, `message_number`, `status` (sent messages' delivery status), and `hidden`. Text that starts with `=`, `+`, `-`, or `@` gets a leading apostrophe so a spreadsheet shows it as typed rather than running it as a formula.
 
 ## APRS And AX.25 Behavior
 
