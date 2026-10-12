@@ -14,7 +14,7 @@ This document mirrors the Help window available from inside APRSWolf.
 
 ### Quick Start
 
-1. Open `Preferences` from the app menu (macOS: `APRSWolf > Preferences`).
+1. Open `Preferences` with the gear (⚙︎) at the top right of the main window, or from the app menu (macOS: `APRSWolf > Preferences`).
 2. Enter your callsign and at least one transport.
 3. Click `Save`.
 4. Connect either TNC or APRS-IS from the main window.
@@ -62,7 +62,11 @@ This document mirrors the Help window available from inside APRSWolf.
 - Use filter chips to limit traffic by category.
 - `Messages` shows all APRS message frames; `To Me` only shows traffic addressed to your station.
 - Turn on `Promiscuous Base-Call` in the main window if `To Me` should also include your base callsign without the SSID.
-- Use `Pop Out` to open Received Messages in a separate window.
+- A red count on `To Me`, and on the app icon, shows messages addressed to you that arrived while APRSWolf was in the background. The app icon count can be turned off in Preferences.
+- The search field in the Sent Messages header searches sent and received messages across the whole history and filters both panes.
+- Use `Pop Out` to open the Messages window: sent and received in one timeline, with its own search.
+- A packet heard twice, over RF and APRS-IS or through two digipeaters, is listed once.
+- Hover a message and click `×` to clear it, or use `Clear all` beside a pane title to clear what that pane shows. Hold a message for half a second to select several, then click `×` on any selected one. Leave `Delete from database` unchecked to hide them but keep them findable by search, where `↺` puts one back; check it to delete them.
 - Leave `Show ACKs` off for everyday use.
 - Use `Traffic Log` when you need a full event history.
 

@@ -30,19 +30,19 @@ Grab the latest version from the
 
 **Which ARM build do I need?** The `aarch64` DMG is for **Apple Silicon Macs**
 (M1 and later). The `arm64` Linux packages are for **ARM64 Linux**, such as a
-64-bit Raspberry Pi. They are not interchangeable — pick the one that matches
+64-bit Raspberry Pi. They are not interchangeable - pick the one that matches
 your operating system, not just the CPU family.
 
 Recommended for most users:
 
-- macOS: the DMG that matches your Mac — `x64` for Intel, `aarch64` for Apple Silicon
+- macOS: the DMG that matches your Mac - `x64` for Intel, `aarch64` for Apple Silicon
 - Windows: the `.exe` installer
 - Linux: the `.deb` on Debian/Ubuntu, the `.rpm` on Fedora/openSUSE, or the AppImage on any distro
 
 ## Quick Start
 
 1. Install APRSWolf for your platform (see [Installing APRSWolf](#installing-aprswolf)).
-2. Open `Preferences` from the app menu (macOS: `APRSWolf > Preferences`; Windows/Linux: the Preferences item in the app menu).
+2. Open `Preferences` with the gear (⚙︎) at the top right of the main window, or from the app menu (macOS: `APRSWolf > Preferences`; Windows/Linux: the Preferences item in the app menu).
 3. Enter your callsign and save at least one connection path.
 4. Choose one connection mode from the main window:
 	- `Connect TNC` for Dire Wolf / RF use
@@ -182,8 +182,13 @@ Features:
 - `Messages` shows all APRS message frames, while `To Me` only shows traffic addressed to your station
 - Turn on `Promiscuous Base-Call` in the main window if you want `To Me` to also include your base callsign without the SSID
 - Hide ACK messages unless you explicitly enable them
-- Pop out the received pane into a separate window
+- See a red count on `To Me` for messages addressed to you that arrived while APRSWolf was in the background; the app icon shows the same count unless you turn it off in Preferences
+- Search sent and received messages from the field in the Sent Messages header
+- Hide or delete messages (see [Searching And Clearing Messages](#searching-and-clearing-messages))
+- Pop out a separate Messages window that shows sent and received together
 - Open the Help window for a task-focused walkthrough without leaving the app
+
+A packet heard twice, over RF and APRS-IS or through two digipeaters, is listed once. The Traffic Log still shows both copies, the second tagged `(duplicate)`.
 
 ### Received Message Filter Bar
 
@@ -217,17 +222,35 @@ To return to unfiltered view, click `All`.
 
 Leave the field blank if you do not want APRSWolf to send an APRS-IS filter command. The filter is optional, so you only need to enter it when you want to narrow APRS-IS traffic.
 
-### Pop-Out Received Window
+### Messages Window (Pop Out)
 
-Click the pop-out button in the received pane header to open received messages in a separate window.
+Click `Pop Out ↗` in the Received Messages header to open the Messages window.
 
-The pop-out window has:
+The Messages window has:
 
-- the same filter bar as the main pane
-- click-to-reply support
-- its own Close Window button
+- sent and received messages in one timeline, newest first; sent ones are purple and show their delivery status
+- the same filter bar as the main pane (sent messages show under `All` and `Messages`)
+- its own search field, covering sent and received
+- `Load older messages` at the bottom for the next 200
+- click-to-reply on received messages
+- `Clear all` and its own Close Window button
 
-The main pane and pop-out window share the same received message list.
+While it's open, the main window's Received pane points you to it.
+
+## Searching And Clearing Messages
+
+Sent and received messages are kept across restarts. Type in the search field in the Sent Messages header to search callsigns and message text across the whole history. Both panes filter as you type; clear the field to go back to the normal lists.
+
+To clear messages:
+
+- Hover a message and click `×` to clear it.
+- `Clear all`, beside each pane's title, clears the messages that pane shows: up to the newest 200, after any filter chips. Older history isn't touched.
+- Hold a message for half a second to start selecting. A checkbox appears on every message; check the ones you want, then click `×` on any checked message. `Done` or Escape leaves selection.
+
+Each opens a dialog with a `Delete from database` box, unchecked by default:
+
+- Unchecked: the messages leave the list but stay in the database. Search still finds them, marked `HIDDEN`, and `↺` beside a hidden result puts it back in its list.
+- Checked: the messages are deleted and no search finds them.
 
 ### Show ACKs
 
@@ -265,11 +288,9 @@ Notes:
 - Beacon sending uses whichever transport is currently connected
 - A cooldown timer prevents repeated accidental beacon sends
 
-### Auto-Beacon On Connect
+### Automatic Beacons
 
-When beacon coordinates and symbol are set, APRSWolf automatically sends a position beacon immediately after a TNC connection is established.
-
-This happens once per connect event. If you do not want an automatic beacon, leave the beacon latitude and longitude fields empty.
+Automatic beacons are off by default. In Preferences under Beacon, check `Beacon on connect` to send one each time a connection is made, and set `Auto-beacon every` to send one on a timer. Both need beacon coordinates and a symbol.
 
 ## Activity Notice
 
@@ -293,7 +314,7 @@ It is useful for:
 
 ## In-App Help Window
 
-Use `Help > APRSWolf Help` in the app menu, or the Help button in the main window, to open the built-in help window.
+Use `Help > APRSWolf Help` in the app menu to open the built-in help window.
 
 The Help window is designed like a standard utility window:
 
