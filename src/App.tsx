@@ -21,9 +21,15 @@ import { type AppSettingsPayload, type ReceivedFilter, type ThemeMode, FILTER_OP
 import {
   isReceivedWindowOpen,
   publishReceivedSnapshot,
+  subscribePopoutFocus,
   subscribeReceivedWindowState,
   type ReceivedItem,
 } from "./receivedBus";
+import { useToMeUnread } from "./lib/useToMeUnread";
+import { setAppBadge } from "./lib/appBadge";
+import { useWindowFocused } from "./lib/useWindowFocused";
+import UnreadDot from "./UnreadDot";
+import { formatReceivedTime, useMessageSearch } from "./lib/messageHistory";
 import packageJson from "../package.json";
 
 type StatusPayload = {
@@ -106,6 +112,7 @@ function App() {
   const [autoBeaconIntervalSecs, setAutoBeaconIntervalSecs] = useState(0);
   const [autoBeaconOnConnect, setAutoBeaconOnConnect] = useState(false);
   const [playMessageSound, setPlayMessageSound] = useState(true);
+  const [showAppBadge, setShowAppBadge] = useState(true);
   const [promiscuousBaseCallsign, setPromiscuousBaseCallsign] = useState(false);
   const [themeMode, setThemeMode] = useState<ThemeMode>("system");
   const [msgFontSize, setMsgFontSize] = useState(15);
@@ -162,6 +169,7 @@ function App() {
     setAutoBeaconIntervalSecs(typeof s.auto_beacon_interval_secs === "number" ? s.auto_beacon_interval_secs : 0);
     setAutoBeaconOnConnect(s.auto_beacon_on_connect ?? false);
     setPlayMessageSound(s.play_message_sound ?? true);
+    setShowAppBadge(s.show_app_badge ?? true);
     setPromiscuousBaseCallsign(Boolean(s.promiscuous_base_callsign));
     if (s.theme_mode === "light" || s.theme_mode === "dark" || s.theme_mode === "system") {
       setThemeMode(s.theme_mode);
@@ -364,6 +372,28 @@ function App() {
   useEffect(() => {
     publishReceivedSnapshot(receivedItems);
   }, [receivedItems]);
+
+  const unreadToMe = useToMeUnread(receivedItems, source, promiscuousBaseCallsign);
+
+  // While the search box has text, the pane lists matches from the whole
+  // stored history instead of the live items.
+  const search = useMessageSearch();
+  const shownReceived = search.results ?? receivedItems;
+
+  // Focus marks messages read (see useToMeUnread), but the badge also hides
+  // the moment either window takes focus, before the read marker catches up.
+  const mainFocused = useWindowFocused();
+  const [popoutFocused, setPopoutFocused] = useState(false);
+  useEffect(() => subscribePopoutFocus(setPopoutFocused), []);
+  const appFocused = mainFocused || popoutFocused;
+
+  useEffect(() => {
+    const count = showAppBadge && !appFocused ? unreadToMe : 0;
+    // Moving focus between our own windows blurs one before the other
+    // reports focus; wait a beat so the badge doesn't flash.
+    const timer = window.setTimeout(() => { void setAppBadge(count); }, 150);
+    return () => window.clearTimeout(timer);
+  }, [showAppBadge, appFocused, unreadToMe]);
 
   const connected = isConnected;
   const canSend = isConnected || aprsisConnected;
@@ -963,8 +993,8 @@ function App() {
 
   const filteredReceived = useMemo(() => {
     const ackFiltered = showAckMessages
-      ? receivedItems
-      : receivedItems.filter((item) => !isAckMessageBody(item.body));
+      ? shownReceived
+      : shownReceived.filter((item) => !isAckMessageBody(item.body));
 
     if (activeReceivedFilters.length === 0 || activeReceivedFilters.includes("all")) {
       return ackFiltered;
@@ -978,7 +1008,7 @@ function App() {
         return kind === filter;
       });
     });
-  }, [activeReceivedFilters, promiscuousBaseCallsign, receivedItems, showAckMessages, source]);
+  }, [activeReceivedFilters, promiscuousBaseCallsign, shownReceived, showAckMessages, source]);
 
   function toggleReceivedFilter(key: ReceivedFilter) {
     setActiveReceivedFilters((current) => {
@@ -999,7 +1029,7 @@ function App() {
 
   const filterCounts = useMemo(() => {
     const counts: Record<ReceivedFilter, number> = {
-      all: receivedItems.length,
+      all: shownReceived.length,
       to_me: 0,
       bulletin: 0,
       qry: 0,
@@ -1014,7 +1044,7 @@ function App() {
       other: 0,
     };
 
-    for (const item of receivedItems) {
+    for (const item of shownReceived) {
       const kind = (item.aprsType ?? "other") as ReceivedFilter;
       if (kind in counts && kind !== "all" && kind !== "to_me" && kind !== "bulletin") {
         counts[kind] += 1;
@@ -1032,7 +1062,7 @@ function App() {
     }
 
     return counts;
-  }, [promiscuousBaseCallsign, receivedItems, source]);
+  }, [promiscuousBaseCallsign, shownReceived, source]);
 
   const beaconConfigured = Boolean(beaconLat.trim() && beaconLon.trim() && beaconSymbol.trim());
   const tncConfigured = Boolean(source.trim() && host.trim() && port.trim());
@@ -1140,6 +1170,15 @@ function App() {
         <div className="msg-pane">
           <div className="msg-pane-header">
             <h2>Received Messages</h2>
+            <input
+              type="search"
+              className="msg-pane-search"
+              value={search.query}
+              onChange={(e) => search.setQuery(e.currentTarget.value)}
+              placeholder="Search all history"
+              aria-label="Search message history"
+              disabled={receivedWindowOpen}
+            />
             <button type="button" className="log-window-btn" onClick={openReceivedWindow}>
               {receivedWindowOpen ? "Focus Pop-Out ↗" : "Pop Out ↗"}
             </button>
@@ -1180,15 +1219,18 @@ function App() {
                     aria-pressed={activeReceivedFilters.includes(key)}
                   >
                     {label} <span className="rx-filter-count">{filterCounts[key]}</span>
+                    {key === "to_me" ? <UnreadDot count={unreadToMe} /> : null}
                   </button>
                 ))}
               </div>
               <div className="msg-list">
                 {filteredReceived.length === 0 ? (
                   <p className="empty">
-                    {activeReceivedFilters.includes("to_me") && activeReceivedFilters.length === 1
-                      ? "No messages addressed to you."
-                      : "No received messages for this filter."}
+                    {search.results
+                      ? "No messages match your search."
+                      : activeReceivedFilters.includes("to_me") && activeReceivedFilters.length === 1
+                        ? "No messages addressed to you."
+                        : "No received messages for this filter."}
                   </p>
                 ) : null}
                 {filteredReceived.map((item) => (
@@ -1199,7 +1241,7 @@ function App() {
                     onClick={() => openReplyDialog(item)}
                   >
                     <div className="msg-item-top-row">
-                      <span className="msg-time">{new Date(item.timestamp).toLocaleTimeString()}</span>
+                      <span className="msg-time">{formatReceivedTime(item.timestamp)}</span>
                       <span className="msg-addr">◀ {item.from}</span>
                       {item.aprsType && item.aprsType !== "other" ? <span className="msg-type-badge">{item.aprsType}</span> : null}
                       {item.micEDecoded ? <span className="mic-e-inline-badge">Mic-E</span> : null}
@@ -1207,6 +1249,11 @@ function App() {
                     <div className="msg-body">{item.body}</div>
                   </button>
                 ))}
+                {search.results && search.hasMore ? (
+                  <button type="button" className="secondary received-window-load-older" onClick={() => void search.loadMore()}>
+                    Load older matches
+                  </button>
+                ) : null}
               </div>
             </>
           )}

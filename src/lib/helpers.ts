@@ -52,6 +52,10 @@ export function isAckMessageBody(text: string): boolean {
   return /^ack[A-Za-z0-9]{1,5}$/i.test(text.trim());
 }
 
+export function isAckOrRejectBody(text: string): boolean {
+  return /^(ack|rej)[A-Za-z0-9]{1,5}$/i.test(text.trim());
+}
+
 // ── Message payload types ───────────────────────────────────
 
 export type MessagePayload = {
@@ -130,6 +134,23 @@ export function matchesStationAddress(
   );
 }
 
+// To Me messages that arrived after the read marker, leaving out acks and
+// rejects, which answer our own sends rather than ask for attention.
+export function countUnreadToMe(
+  items: ReceivedItem[],
+  station: string,
+  allowBaseCallsign: boolean,
+  readAt: number,
+): number {
+  let count = 0;
+  for (const item of items) {
+    if (item.timestamp <= readAt) continue;
+    if (isAckOrRejectBody(item.body)) continue;
+    if (matchesStationAddress(item, station, allowBaseCallsign)) count += 1;
+  }
+  return count;
+}
+
 // ── Settings payload builder ─────────────────────────────────
 
 export type SettingsParams = {
@@ -155,6 +176,7 @@ export type SettingsParams = {
   themeMode?: "system" | "light" | "dark";
   msgFontSize?: number;
   shortLivedRetentionDays?: number;
+  showAppBadge?: boolean;
 };
 
 /**
@@ -189,5 +211,6 @@ export function buildSettingsPayload(params: SettingsParams): Record<string, unk
     ...(params.shortLivedRetentionDays !== undefined
       ? { short_lived_retention_days: params.shortLivedRetentionDays }
       : {}),
+    ...(params.showAppBadge !== undefined ? { show_app_badge: params.showAppBadge } : {}),
   };
 }

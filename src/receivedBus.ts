@@ -31,10 +31,19 @@ type ReceivedSyncEvent =
   | {
       type: "window-state";
       open: boolean;
+    }
+  | {
+      type: "to-me-read";
+      at: number;
+    }
+  | {
+      type: "popout-focus";
+      focused: boolean;
     };
 
 const CHANNEL_NAME = "aprswolf-received-sync";
 const WINDOW_STATE_KEY = "aprswolf-received-window-open";
+const TO_ME_READ_KEY = "aprswolf-to-me-read-at";
 
 // One long-lived publish channel instead of create+close per message —
 // bursts on a busy feed no longer churn channel objects. (BroadcastChannel
@@ -110,6 +119,59 @@ export function subscribeReceivedWindowState(listener: (open: boolean) => void):
   return subscribe((payload) => {
     if (payload.type === "window-state") {
       listener(payload.open);
+    }
+  });
+}
+
+// ── Unread To Me marker ──────────────────────────────────────
+// To Me messages newer than this timestamp are unread. Both windows read the
+// same marker from localStorage and hear changes over the channel, so viewing
+// To Me in either window clears the count in both. It survives a restart, so
+// messages that arrived unread before quitting stay unread.
+
+export function getToMeReadAt(): number {
+  try {
+    const stored = Number(window.localStorage.getItem(TO_ME_READ_KEY));
+    if (Number.isFinite(stored) && stored > 0) return stored;
+  } catch {
+    // Fall through to "now" so stored history is not all unread.
+  }
+  const now = Date.now();
+  try {
+    window.localStorage.setItem(TO_ME_READ_KEY, String(now));
+  } catch {
+    // Ignore storage issues.
+  }
+  return now;
+}
+
+export function markToMeRead(at: number = Date.now()): void {
+  try {
+    window.localStorage.setItem(TO_ME_READ_KEY, String(at));
+  } catch {
+    // Ignore storage issues and still broadcast.
+  }
+  postEvent({ type: "to-me-read", at });
+}
+
+export function subscribeToMeRead(listener: (at: number) => void): () => void {
+  return subscribe((payload) => {
+    if (payload.type === "to-me-read") {
+      listener(payload.at);
+    }
+  });
+}
+
+// The pop-out reports its focus so the main window knows when the app as a
+// whole is in front.
+export function publishPopoutFocus(focused: boolean): void {
+  postEvent({ type: "popout-focus", focused });
+}
+
+export function subscribePopoutFocus(listener: (focused: boolean) => void): () => void {
+  return subscribe((payload) => {
+    if (payload.type === "popout-focus") {
+      listener(payload.focused);
     }
   });
 }

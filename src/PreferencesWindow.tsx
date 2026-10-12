@@ -30,6 +30,7 @@ const EMPTY_SETTINGS: AppSettingsPayload = {
   short_lived_retention_days: 7,
   show_ack_messages: false,
   play_message_sound: true,
+  show_app_badge: true,
   promiscuous_base_callsign: false,
   theme_mode: "system",
   msg_font_size: 15,
@@ -39,12 +40,12 @@ const EMPTY_SETTINGS: AppSettingsPayload = {
 // capped at the screen's usable height (the title bar sits outside it).
 async function fitWindowToContent() {
   if (!(globalThis as { isTauri?: boolean }).isTauri) return;
-  const toolbar = document.querySelector<HTMLElement>(".preferences-window-toolbar");
   const form = document.querySelector<HTMLElement>(".preferences-window-body");
-  if (!toolbar || !form) return;
+  if (!form) return;
   const TITLE_BAR = 32;
-  const PADDING_AND_GAP = 30;
-  const wanted = toolbar.offsetHeight + form.scrollHeight + PADDING_AND_GAP;
+  // The form scrolls inside the window, so whatever it can't show is the
+  // height the window is short by (negative when the window is too tall).
+  const wanted = window.innerHeight + (form.scrollHeight - form.clientHeight);
   const height = Math.min(wanted, window.screen.availHeight - TITLE_BAR);
   try {
     const { getCurrentWindow, LogicalSize } = await import("@tauri-apps/api/window");
@@ -218,6 +219,7 @@ function PreferencesWindow() {
       themeMode: s.theme_mode,
       msgFontSize: s.msg_font_size,
       shortLivedRetentionDays: s.short_lived_retention_days,
+      showAppBadge: s.show_app_badge,
     });
 
     try {
@@ -317,6 +319,14 @@ function PreferencesWindow() {
                 onChange={(event) => updateSetting("play_message_sound", event.currentTarget.checked)}
               />
               Play sound for direct inbound messages
+            </label>
+            <label className="inline-toggle">
+              <input
+                type="checkbox"
+                checked={settings.show_app_badge ?? true}
+                onChange={(event) => updateSetting("show_app_badge", event.currentTarget.checked)}
+              />
+              Show unread To Me count on the app icon
             </label>
             <label className="inline-toggle">
               <input
@@ -515,9 +525,11 @@ function PreferencesWindow() {
           </div>
         </section>
 
-        <div className={`preferences-save-status preferences-save-${saveState}`} aria-live="polite">
-          {saveMessage || "Changes here update the saved configuration used by the main app window."}
-        </div>
+        {saveMessage ? (
+          <div className={`preferences-save-status preferences-save-${saveState}`} aria-live="polite">
+            {saveMessage}
+          </div>
+        ) : null}
       </form>
     </div>
   );

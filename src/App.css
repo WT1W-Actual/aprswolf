@@ -445,6 +445,23 @@ a.config-meta:hover {
   text-decoration: underline;
 }
 
+.unread-dot {
+  display: inline-block;
+  min-width: 16px;
+  height: 16px;
+  margin-left: 4px;
+  padding: 0 4px;
+  box-sizing: border-box;
+  border-radius: 8px;
+  background: #ff3b30;
+  color: #fff;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 16px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
 .status-dot {
   display: inline-block;
   width: 8px;
@@ -527,6 +544,7 @@ form.preferences-window-body > .prefs-tnc { grid-area: 2 / 1; }
 form.preferences-window-body > .prefs-aprsis { grid-area: 2 / 2; }
 form.preferences-window-body > .prefs-history { grid-area: 3 / 1; }
 form.preferences-window-body > .prefs-remote { grid-area: 3 / 2; }
+form.preferences-window-body > .preferences-save-status { grid-column: 1 / -1; }
 
 form.preferences-window-body .preferences-grid-four {
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -741,6 +759,18 @@ form.preferences-window-body .preferences-grid-four {
   font-size: 12px;
   font-weight: 600;
   color: #3c3c43;
+}
+
+.msg-pane-search {
+  flex: 0 1 200px;
+  min-width: 90px;
+  margin-left: auto;
+}
+
+/* Pop Out shares the Traffic Log button's auto margin; beside the search
+   field that would split the free space and leave a gap between them. */
+.msg-pane-search + .log-window-btn {
+  margin-left: 0;
 }
 
 .msg-pane-header {

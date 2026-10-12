@@ -47,6 +47,9 @@ pub struct AppSettings {
     pub short_lived_retention_days: u32,
     pub show_ack_messages: bool,
     pub play_message_sound: bool,
+    /// Show the unread To Me count on the app icon (dock badge, or a
+    /// taskbar overlay on Windows).
+    pub show_app_badge: bool,
     pub promiscuous_base_callsign: bool,
     pub theme_mode: String,
     pub msg_font_size: u32,
@@ -75,6 +78,7 @@ impl Default for AppSettings {
             short_lived_retention_days: 7,
             show_ack_messages: false,
             play_message_sound: true,
+            show_app_badge: true,
             promiscuous_base_callsign: false,
             theme_mode: "system".to_string(),
             msg_font_size: 15,

@@ -10,6 +10,7 @@ import packageJson from "../package.json";
 
 const invokeMock = vi.fn() as any;
 const destroyWindowMock = vi.fn();
+const setBadgeCountMock = vi.fn();
 const listenMock = vi.fn() as any;
 const getVersionMock = vi.fn() as any;
 const openUrlMock = vi.fn() as any;
@@ -53,7 +54,7 @@ vi.mock("@tauri-apps/plugin-opener", () => ({
 }));
 
 vi.mock("@tauri-apps/api/window", () => ({
-  getCurrentWindow: () => ({ destroy: destroyWindowMock }),
+  getCurrentWindow: () => ({ destroy: destroyWindowMock, setBadgeCount: setBadgeCountMock }),
 }));
 
 beforeEach(() => {
@@ -116,6 +117,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  (document.hasFocus as any).mockRestore?.();
   delete (globalThis as any).isTauri;
   window.localStorage.clear();
   vi.restoreAllMocks();
@@ -718,6 +720,111 @@ describe("App", () => {
     fireEvent.click(screen.getByLabelText(/promiscuous base-call/i));
 
     expect(await screen.findByText("Hello same base")).toBeInTheDocument();
+  });
+
+  async function renderWithMessageHandler(settings: Record<string, unknown> = {}) {
+    invokeMock.mockImplementation((cmd: string) => {
+      if (cmd === "load_settings") return Promise.resolve({ ...DEFAULT_SETTINGS, ...settings });
+      if (cmd === "load_received_messages") return Promise.resolve([]);
+      if (cmd === "get_web_server_status") return Promise.resolve({ enabled: false, port: 18420, url: null });
+      if (cmd === "get_manual_beacon_cooldown_remaining") return Promise.resolve(0);
+      return Promise.resolve(undefined);
+    });
+    render(<App />);
+    let handler: ((event: unknown) => void) | undefined;
+    await waitFor(() => {
+      handler = listenMock.mock.calls.find((call: any) => call[0] === "tnc_message")?.[1];
+      expect(handler).toBeTruthy();
+    });
+    return (from: string, to: string | undefined, body: string, aprsType = "msg") =>
+      handler?.({
+        payload: {
+          text: `${from}>APZWLF::${to ?? ""}:${body}`,
+          payload_hex: "AABBCCDD",
+          bytes: 32,
+          source: from,
+          destination: "APZWLF",
+          path: [],
+          from,
+          to,
+          body,
+          aprsType,
+          isBulletin: false,
+          micEDecoded: false,
+          summary_source: from,
+          summary_destination: "APZWLF",
+        },
+      });
+  }
+
+  it("marks To Me messages unread on the chip and app icon while the app is in the background", async () => {
+    const hasFocus = vi.spyOn(document, "hasFocus").mockReturnValue(false);
+    localStorageStore["aprswolf-to-me-read-at"] = "1";
+    setBadgeCountMock.mockClear();
+    const emit = await renderWithMessageHandler();
+
+    emit("N0CALL-1", "WT1W-15", "Are you on the net tonight");
+    emit("N0CALL-1", "WT1W-15", "ack12");
+    emit("N0CALL-2", undefined, "!3830.00N/12130.00W>Mobile", "pos");
+
+    expect(await screen.findByTitle("1 unread")).toBeInTheDocument();
+    await waitFor(() => expect(setBadgeCountMock).toHaveBeenLastCalledWith(1));
+
+    // Bringing the app forward marks it read: chip dot and icon badge clear.
+    hasFocus.mockReturnValue(true);
+    fireEvent.focus(window);
+    await waitFor(() => expect(setBadgeCountMock).toHaveBeenLastCalledWith(undefined));
+    await waitFor(() => expect(screen.queryByTitle(/unread/)).not.toBeInTheDocument());
+  });
+
+  it("shows no unread dot or icon badge for messages that arrive while the app has focus", async () => {
+    vi.spyOn(document, "hasFocus").mockReturnValue(true);
+    localStorageStore["aprswolf-to-me-read-at"] = "1";
+    setBadgeCountMock.mockClear();
+    const emit = await renderWithMessageHandler();
+
+    emit("N0CALL-1", "WT1W-15", "Are you on the net tonight");
+
+    expect(await screen.findByText("Are you on the net tonight")).toBeInTheDocument();
+    await new Promise((resolve) => setTimeout(resolve, 250));
+    expect(screen.queryByTitle(/unread/)).not.toBeInTheDocument();
+    expect(setBadgeCountMock).not.toHaveBeenCalledWith(1);
+  });
+
+  it("keeps the app badge off when the setting is disabled", async () => {
+    vi.spyOn(document, "hasFocus").mockReturnValue(false);
+    localStorageStore["aprswolf-to-me-read-at"] = "1";
+    setBadgeCountMock.mockClear();
+    const emit = await renderWithMessageHandler({ show_app_badge: false });
+
+    emit("N0CALL-1", "WT1W-15", "Are you on the net tonight");
+
+    expect(await screen.findByTitle("1 unread")).toBeInTheDocument();
+    await new Promise((resolve) => setTimeout(resolve, 250));
+    expect(setBadgeCountMock).not.toHaveBeenCalledWith(1);
+  });
+
+  it("searches full message history from the main window's received pane", async () => {
+    const old = Date.UTC(2026, 7, 27, 18, 0, 0);
+    invokeMock.mockImplementation((cmd: string, payload?: any) => {
+      if (cmd === "load_settings") return Promise.resolve(DEFAULT_SETTINGS);
+      if (cmd === "load_received_messages") return Promise.resolve([]);
+      if (cmd === "get_web_server_status") return Promise.resolve({ enabled: false, port: 18420, url: null });
+      if (cmd === "get_manual_beacon_cooldown_remaining") return Promise.resolve(0);
+      if (cmd === "search_received_messages" && payload?.query === "potluck") {
+        return Promise.resolve([
+          { id: 1, uuid: "u-1", seq: 7, timestamp: old, from: "W6TEST-1", to: "WT1W-15", body: "Bring a dish to the potluck", aprsType: "msg" },
+        ]);
+      }
+      return Promise.resolve(undefined);
+    });
+    render(<App />);
+
+    fireEvent.change(await screen.findByLabelText("Search message history"), { target: { value: "potluck" } });
+
+    expect(await screen.findByText("Bring a dish to the potluck")).toBeInTheDocument();
+    expect(invokeMock).toHaveBeenCalledWith("search_received_messages", { query: "potluck" });
+    expect(screen.getByText(new Date(old).toLocaleString())).toBeInTheDocument();
   });
 
   it("does not invoke connect_tnc when TNC port is invalid", async () => {
