@@ -55,6 +55,10 @@ pub enum DeliveryState {
 #[derive(Clone, Serialize, Deserialize)]
 pub struct QueuedMessage {
     id: u64,
+    /// Key of this message's row in the sent history. Empty for a message
+    /// queued by a build that predates the history; those are not recorded.
+    #[serde(default)]
+    uuid: String,
     destination: String,
     body: String,
     #[serde(default)]
@@ -111,6 +115,7 @@ pub struct ReceivedMessage {
 #[derive(Clone, Serialize)]
 pub struct SentMessage {
     id: u64,
+    uuid: String,
     status: DeliveryState,
     payload_hex: String,
     bytes: usize,
@@ -119,6 +124,7 @@ pub struct SentMessage {
 #[derive(Clone, Serialize)]
 pub struct DeliveryEvent {
     id: u64,
+    uuid: String,
     status: DeliveryState,
     attempts: u32,
     detail: Option<String>,
@@ -465,10 +471,34 @@ fn emit_status(app: &AppHandle, state: &str, detail: Option<String>) {
 }
 
 fn emit_delivery(app: &AppHandle, message: &QueuedMessage, detail: Option<String>) {
+    // Every delivery change passes through here, so this is where the sent
+    // history learns about new messages and keeps their status current.
+    if !message.uuid.is_empty() {
+        let status = serde_json::to_value(&message.status)
+            .ok()
+            .and_then(|v| v.as_str().map(str::to_string))
+            .unwrap_or_default();
+        crate::message_store::record_sent(
+            app,
+            &crate::message_store::SentRecord {
+                uuid: &message.uuid,
+                created_at: message.created_at_ms as i64,
+                from_call: &message.source,
+                to_call: &message.destination,
+                body: &message.body,
+                path: &message.path,
+                aprs_id: &message.aprs_id,
+                status: &status,
+                attempts: message.attempt_count,
+                detail: detail.as_deref(),
+            },
+        );
+    }
     let _ = app.emit(
         "tnc_delivery",
         DeliveryEvent {
             id: message.id,
+            uuid: message.uuid.clone(),
             status: message.status.clone(),
             attempts: message.attempt_count,
             detail,
@@ -1541,6 +1571,7 @@ pub async fn send_message(
     let normalized_path = digi_strings.join(",");
 
     let aprs_message_id = format!("{:02}", message_id % 100);
+    let message_uuid = uuid::Uuid::new_v4().to_string();
     let source_with_ssid = format_station_with_ssid(&src_call, src_ssid);
     let pending_reply_ack = latest_reply_ack_for_station(&state, &destination).await;
     let payloads = build_queued_message_payloads(
@@ -1556,6 +1587,7 @@ pub async fn send_message(
         let mut queue = state.queue.lock().await;
         queue.push(QueuedMessage {
             id: message_id,
+            uuid: message_uuid.clone(),
             destination,
             body,
             path: normalized_path,
@@ -1599,6 +1631,7 @@ pub async fn send_message(
 
     Ok(SentMessage {
         id: message_id,
+        uuid: message_uuid,
         status: snapshot.status,
         payload_hex: payloads.ax25_hex,
         bytes: payloads.ax25_frame.len(),
@@ -1688,17 +1721,21 @@ pub async fn send_beacon_for_app(
 pub async fn clear_queue(app: AppHandle) -> Result<usize, String> {
     let state = app.state::<AppState>().inner().clone();
     let mut queue = state.queue.lock().await;
-    let mut count = 0usize;
+    let mut expired = Vec::new();
     for msg in queue.iter_mut() {
         if msg.status != DeliveryState::Acked && msg.status != DeliveryState::Expired {
             msg.status = DeliveryState::Expired;
             msg.next_retry_at_ms = None;
-            count += 1;
+            expired.push(msg.clone());
         }
     }
     drop(queue);
     persist_queue(&state).await?;
-    Ok(count)
+    // Report each expiry so the window and the sent history both show it.
+    for msg in &expired {
+        emit_delivery(&app, msg, Some("queue cleared".to_string()));
+    }
+    Ok(expired.len())
 }
 
 #[derive(Clone, Serialize)]

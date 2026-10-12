@@ -827,6 +827,34 @@ describe("App", () => {
     expect(screen.getByText(new Date(old).toLocaleString())).toBeInTheDocument();
   });
 
+  it("lists sent messages from earlier sessions and keeps their status current", async () => {
+    invokeMock.mockImplementation((cmd: string) => {
+      if (cmd === "load_settings") return Promise.resolve(DEFAULT_SETTINGS);
+      if (cmd === "load_received_messages") return Promise.resolve([]);
+      if (cmd === "load_sent_messages") {
+        return Promise.resolve([
+          { uuid: "s-1", seq: 4, timestamp: Date.now(), destination: "N6TEST-7", body: "See you on the net", status: "sent" },
+        ]);
+      }
+      if (cmd === "get_web_server_status") return Promise.resolve({ enabled: false, port: 18420, url: null });
+      if (cmd === "get_manual_beacon_cooldown_remaining") return Promise.resolve(0);
+      return Promise.resolve(undefined);
+    });
+    render(<App />);
+
+    const row = (await screen.findByText("See you on the net")).closest(".msg-item") as HTMLElement;
+    expect(within(row).getByText("sent")).toBeInTheDocument();
+
+    let deliveryHandler: ((event: unknown) => void) | undefined;
+    await waitFor(() => {
+      deliveryHandler = listenMock.mock.calls.find((call: any) => call[0] === "tnc_delivery")?.[1];
+      expect(deliveryHandler).toBeTruthy();
+    });
+    deliveryHandler?.({ payload: { id: 1, uuid: "s-1", status: "acked", attempts: 1, detail: "ack received" } });
+
+    await waitFor(() => expect(within(row).getByText("acked")).toBeInTheDocument());
+  });
+
   it("does not invoke connect_tnc when TNC port is invalid", async () => {
     invokeMock.mockImplementation((cmd: string) => {
       if (cmd === "load_settings") {

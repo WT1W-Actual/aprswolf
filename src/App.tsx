@@ -39,6 +39,7 @@ type StatusPayload = {
 
 type DeliveryPayload = {
   id: number;
+  uuid?: string;
   status: "queued" | "sent" | "acked" | "failed" | "expired";
   attempts: number;
   detail?: string | null;
@@ -52,6 +53,8 @@ type WebServerStatusPayload = {
 
 type SentItem = {
   id: number;
+  // Key of the row in the sent history; delivery updates match on it.
+  uuid?: string;
   timestamp: number;
   destination: string;
   body: string;
@@ -330,7 +333,21 @@ function App() {
       // remain permanently disabled.
       try { window.localStorage.removeItem("aprswolf-received-window-open"); } catch {/* ignore */}
       setReceivedWindowOpen(false);
-      invoke("clear_queue").catch(() => {/* ignore */});
+      // Awaited so the sent history below already shows what this expired.
+      await invoke("clear_queue").catch(() => {/* ignore */});
+      // Sent messages persist with their last delivery status.
+      try {
+        const sent = await invoke<SentItem[]>("load_sent_messages");
+        if (Array.isArray(sent) && sent.length > 0) {
+          setSentItems((prev) => {
+            const seen = new Set(prev.map((item) => item.uuid).filter(Boolean));
+            const older = sent
+              .filter((item) => !item.uuid || !seen.has(item.uuid))
+              .map((item) => ({ ...item, id: nextId() }));
+            return [...prev, ...older];
+          });
+        }
+      } catch {/* no sent history */}
       // Received messages persist in the message history; show the newest
       // page behind anything that arrived while this was loading.
       try {
@@ -570,9 +587,12 @@ function App() {
           kind,
           `delivery #${event.payload.id} ${event.payload.status} attempts=${event.payload.attempts}${detail}`,
         );
+        // Match on the history UUID: items loaded from earlier sessions carry
+        // display ids that can collide with this session's queue ids.
+        const { uuid, id, status } = event.payload;
         setSentItems((prev) =>
           prev.map((item) =>
-            item.id === event.payload.id ? { ...item, status: event.payload.status } : item,
+            (uuid ? item.uuid === uuid : item.id === id) ? { ...item, status } : item,
           ),
         );
       });
@@ -753,7 +773,7 @@ function App() {
     try {
       const sourceCallsign = source.trim().toUpperCase();
       const digiPath = path.trim().toUpperCase();
-      const result = await invoke<{ id: number; status: string; bytes: number; payload_hex: string }>("send_message", {
+      const result = await invoke<{ id: number; uuid?: string; status: string; bytes: number; payload_hex: string }>("send_message", {
         source: sourceCallsign,
         destination: destinationCallsign,
         path: digiPath,
@@ -766,6 +786,7 @@ function App() {
       setSentItems((prev) => [
         {
           id: result.id,
+          uuid: result.uuid,
           timestamp: Date.now(),
           destination: destinationCallsign,
           body: message,
@@ -806,7 +827,7 @@ function App() {
     try {
       const sourceCallsign = source.trim().toUpperCase();
       const digiPath = path.trim().toUpperCase();
-      const result = await invoke<{ id: number; status: string; bytes: number; payload_hex: string }>("send_message", {
+      const result = await invoke<{ id: number; uuid?: string; status: string; bytes: number; payload_hex: string }>("send_message", {
         source: sourceCallsign,
         destination: destinationCallsign,
         path: digiPath,
@@ -820,6 +841,7 @@ function App() {
       setSentItems((prev) => [
         {
           id: result.id,
+          uuid: result.uuid,
           timestamp: Date.now(),
           destination: destinationCallsign,
           body: replyMessage,
@@ -1158,7 +1180,7 @@ function App() {
             {sentItems.map((item) => (
               <div key={item.id} className={`msg-item sent-item status-${item.status}`}>
                 <div className="msg-item-top-row">
-                  <span className="msg-time">{new Date(item.timestamp).toLocaleTimeString()}</span>
+                  <span className="msg-time">{formatReceivedTime(item.timestamp)}</span>
                   <span className="msg-addr">▶ {item.destination}</span>
                   <span className={`msg-badge ${item.status}`}>{item.status}</span>
                 </div>

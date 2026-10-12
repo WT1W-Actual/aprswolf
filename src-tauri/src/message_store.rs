@@ -9,6 +9,11 @@
 //!
 //! The windows never hold the whole history: they load one page of
 //! `PAGE_SIZE` rows at a time, newest first.
+//!
+//! Sent messages live in their own table, one row per message keyed by a
+//! UUID, with the delivery status (queued, sent, acked, failed, expired)
+//! updated as it changes. They are conversation, so retention never trims
+//! them.
 
 use std::path::Path;
 use std::sync::{Mutex, OnceLock};
@@ -89,11 +94,32 @@ fn open_at(path: &Path) -> rusqlite::Result<Connection> {
     Ok(conn)
 }
 
+const SCHEMA_SENT: &str = "
+CREATE TABLE sent (
+    seq        INTEGER PRIMARY KEY AUTOINCREMENT,
+    uuid       TEXT NOT NULL UNIQUE,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    from_call  TEXT NOT NULL,
+    to_call    TEXT NOT NULL,
+    body       TEXT NOT NULL,
+    path       TEXT NOT NULL,
+    aprs_id    TEXT NOT NULL,
+    status     TEXT NOT NULL,
+    attempts   INTEGER NOT NULL,
+    detail     TEXT
+);
+";
+
 fn migrate(conn: &Connection) -> rusqlite::Result<()> {
     let version: i64 = conn.pragma_query_value(None, "user_version", |row| row.get(0))?;
     if version < 1 {
         conn.execute_batch(SCHEMA)?;
         conn.pragma_update(None, "user_version", 1)?;
+    }
+    if version < 2 {
+        conn.execute_batch(SCHEMA_SENT)?;
+        conn.pragma_update(None, "user_version", 2)?;
     }
     Ok(())
 }
@@ -112,6 +138,7 @@ fn with_store<T>(app: &AppHandle, f: impl FnOnce(&mut Store) -> Result<T, String
             .map_err(|err| format!("failed to create app data directory: {err}"))?;
         let conn = open_at(&dir.join(DB_FILE)).map_err(|err| format!("failed to open message database: {err}"))?;
         import_legacy_file(&conn, &dir.join(LEGACY_FILE), now_ms());
+        let _ = expire_unfinished_sent(&conn, now_ms());
         *guard = Some(Store { conn, last_prune: None });
     }
     f(guard.as_mut().expect("store opened above"))
@@ -356,6 +383,97 @@ pub fn record_received(app: &AppHandle, event: &mut Value) {
     }
 }
 
+/// One sent message as the delivery queue reports it.
+pub struct SentRecord<'a> {
+    pub uuid: &'a str,
+    pub created_at: i64,
+    pub from_call: &'a str,
+    pub to_call: &'a str,
+    pub body: &'a str,
+    pub path: &'a str,
+    pub aprs_id: &'a str,
+    pub status: &'a str,
+    pub attempts: u32,
+    pub detail: Option<&'a str>,
+}
+
+/// Insert a sent message the first time it is seen, then keep its status,
+/// attempt count and detail current on every later report.
+fn upsert_sent(conn: &Connection, rec: &SentRecord, now: i64) -> rusqlite::Result<()> {
+    conn.execute(
+        "INSERT INTO sent (uuid, created_at, updated_at, from_call, to_call, body, path, aprs_id, status, attempts, detail)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
+         ON CONFLICT(uuid) DO UPDATE SET
+             updated_at = excluded.updated_at,
+             status = excluded.status,
+             attempts = excluded.attempts,
+             detail = excluded.detail",
+        params![
+            rec.uuid,
+            rec.created_at,
+            now,
+            rec.from_call,
+            rec.to_call,
+            rec.body,
+            rec.path,
+            rec.aprs_id,
+            rec.status,
+            rec.attempts,
+            rec.detail,
+        ],
+    )?;
+    Ok(())
+}
+
+/// The outbound queue starts empty at every launch, so a message still
+/// queued or awaiting its ack when the app last closed will never be retried
+/// or acked. Runs once when the store opens, before this session records
+/// anything.
+fn expire_unfinished_sent(conn: &Connection, now: i64) -> rusqlite::Result<usize> {
+    conn.execute(
+        "UPDATE sent SET status = 'expired', detail = 'app closed before delivery', updated_at = ?1
+         WHERE status IN ('queued', 'sent')",
+        params![now],
+    )
+}
+
+/// One page of sent messages, newest first, older than `before_seq` when given.
+fn sent_page(conn: &Connection, before_seq: Option<i64>, limit: usize) -> rusqlite::Result<Vec<Value>> {
+    let mut stmt = conn.prepare(
+        "SELECT seq, uuid, created_at, updated_at, from_call, to_call, body, path, status, attempts, detail
+         FROM sent WHERE seq < ?1 ORDER BY seq DESC LIMIT ?2",
+    )?;
+    let rows = stmt.query_map(params![before_seq.unwrap_or(i64::MAX), limit as i64], |row| {
+        Ok(serde_json::json!({
+            "seq": row.get::<_, i64>(0)?,
+            "uuid": row.get::<_, String>(1)?,
+            "timestamp": row.get::<_, i64>(2)?,
+            "updatedAt": row.get::<_, i64>(3)?,
+            "source": row.get::<_, String>(4)?,
+            "destination": row.get::<_, String>(5)?,
+            "body": row.get::<_, String>(6)?,
+            "path": row.get::<_, String>(7)?,
+            "status": row.get::<_, String>(8)?,
+            "attempts": row.get::<_, u32>(9)?,
+            "detail": row.get::<_, Option<String>>(10)?,
+        }))
+    })?;
+    rows.collect()
+}
+
+/// Record a sent message or its latest delivery status. Called on every
+/// delivery report; a storage failure leaves the app running.
+pub fn record_sent(app: &AppHandle, rec: &SentRecord) {
+    let _ = with_store(app, |store| upsert_sent(&store.conn, rec, now_ms()).map_err(|err| err.to_string()));
+}
+
+/// Newest-first sent messages, one page at a time.
+#[tauri::command]
+pub fn load_sent_messages(app: AppHandle, before_seq: Option<i64>, limit: Option<usize>) -> Vec<Value> {
+    let limit = limit.unwrap_or(PAGE_SIZE).min(PAGE_SIZE);
+    with_store(&app, |store| sent_page(&store.conn, before_seq, limit).map_err(|err| err.to_string())).unwrap_or_default()
+}
+
 /// The newest page of history, for the web remote's state snapshot.
 pub fn recent(app: &AppHandle) -> Vec<Value> {
     with_store(app, |store| page(&store.conn, None, PAGE_SIZE).map_err(|err| err.to_string())).unwrap_or_default()
@@ -394,6 +512,80 @@ mod tests {
 
     fn message(from: &str, to: Option<&str>, body: &str, aprs_type: &str) -> Value {
         json!({ "from": from, "to": to, "body": body, "aprsType": aprs_type, "isBulletin": false })
+    }
+
+    fn sent<'a>(uuid: &'a str, to: &'a str, status: &'a str, attempts: u32) -> SentRecord<'a> {
+        SentRecord {
+            uuid,
+            created_at: 1_000,
+            from_call: "WT1W-15",
+            to_call: to,
+            body: "Hello",
+            path: "WIDE1-1,WIDE2-1",
+            aprs_id: "01",
+            status,
+            attempts,
+            detail: None,
+        }
+    }
+
+    #[test]
+    fn sent_message_keeps_one_row_with_its_latest_status() {
+        let conn = memory_db();
+        upsert_sent(&conn, &sent("s-1", "N6TEST-7", "queued", 0), 1_000).unwrap();
+        upsert_sent(&conn, &sent("s-1", "N6TEST-7", "sent", 1), 2_000).unwrap();
+        upsert_sent(&conn, &sent("s-1", "N6TEST-7", "acked", 1), 3_000).unwrap();
+
+        let rows = sent_page(&conn, None, PAGE_SIZE).unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0]["status"], "acked");
+        assert_eq!(rows[0]["attempts"], 1);
+        assert_eq!(rows[0]["timestamp"], 1_000);
+        assert_eq!(rows[0]["updatedAt"], 3_000);
+    }
+
+    #[test]
+    fn sent_messages_page_newest_first_and_survive_retention() {
+        let conn = memory_db();
+        for i in 0..3 {
+            let (uuid, to) = (format!("s-{i}"), format!("N{i}TEST"));
+            upsert_sent(&conn, &sent(&uuid, &to, "failed", 3), 1_000).unwrap();
+        }
+        prune(&conn, 1, 100 * DAY_MS).unwrap();
+
+        let rows = sent_page(&conn, None, PAGE_SIZE).unwrap();
+        let order: Vec<&str> = rows.iter().map(|r| r["uuid"].as_str().unwrap()).collect();
+        assert_eq!(order, ["s-2", "s-1", "s-0"]);
+        let older = sent_page(&conn, rows[0]["seq"].as_i64(), PAGE_SIZE).unwrap();
+        assert_eq!(older.len(), 2);
+    }
+
+    #[test]
+    fn unfinished_sends_from_a_closed_session_expire() {
+        let conn = memory_db();
+        upsert_sent(&conn, &sent("s-q", "N6TEST-7", "queued", 0), 1_000).unwrap();
+        upsert_sent(&conn, &sent("s-s", "N6TEST-7", "sent", 2), 1_000).unwrap();
+        upsert_sent(&conn, &sent("s-a", "N6TEST-7", "acked", 1), 1_000).unwrap();
+        upsert_sent(&conn, &sent("s-f", "N6TEST-7", "failed", 3), 1_000).unwrap();
+
+        assert_eq!(expire_unfinished_sent(&conn, 5_000).unwrap(), 2);
+        let rows = sent_page(&conn, None, PAGE_SIZE).unwrap();
+        let status = |uuid: &str| rows.iter().find(|r| r["uuid"] == uuid).unwrap()["status"].clone();
+        assert_eq!(status("s-q"), "expired");
+        assert_eq!(status("s-s"), "expired");
+        assert_eq!(status("s-a"), "acked");
+        assert_eq!(status("s-f"), "failed");
+    }
+
+    #[test]
+    fn version_1_database_gains_the_sent_table() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(SCHEMA).unwrap();
+        conn.pragma_update(None, "user_version", 1).unwrap();
+        migrate(&conn).unwrap();
+        let version: i64 = conn.pragma_query_value(None, "user_version", |row| row.get(0)).unwrap();
+        assert_eq!(version, 2);
+        upsert_sent(&conn, &sent("s-1", "N6TEST-7", "queued", 0), 1_000).unwrap();
     }
 
     #[test]

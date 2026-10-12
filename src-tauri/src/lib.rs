@@ -142,6 +142,7 @@ pub fn run() {
             settings::save_settings,
             message_store::load_received_messages,
             message_store::search_received_messages,
+            message_store::load_sent_messages,
             tnc::send_beacon,
             webserver::get_web_server_status,
             webserver::enable_web_server,
