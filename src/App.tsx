@@ -1529,7 +1529,7 @@ function App() {
           <div className="config-head">
             <h2 className="section-title" title={TNC_TIP}>
               <StatusDot on={isConnected} label={isConnected ? "TNC connected" : "TNC disconnected"} />
-              TNC (Dire Wolf)
+              TNC
             </h2>
             <span className="config-meta">{host.trim() && port.trim() ? `${host.trim()}:${port.trim()}` : "not set"}</span>
           </div>

@@ -25,7 +25,7 @@ export const HELP_SECTIONS: HelpSection[] = [
         title: "Main areas of the app",
         items: [
           "Preferences for your station callsign, digi path, theme, sound, beacon coordinates, APRS-IS settings, and remote web options.",
-          "Live TNC connection controls for Dire Wolf host and port using the saved Preferences values.",
+          "Live TNC connection controls for the host and port saved in Preferences.",
           "Live APRS-IS controls using the saved server, port, passcode, and receive filter.",
           "Message composer for direct APRS messages.",
           "Sent and Received panes for day-to-day traffic review.",
@@ -75,7 +75,7 @@ export const HELP_SECTIONS: HelpSection[] = [
         items: [
           "Station callsign and RF digi path.",
           "Theme, message sound, and ACK visibility behavior.",
-          "TNC host and port for Dire Wolf or another compatible TCP TNC.",
+          "TNC host and KISS port for any TNC that offers KISS and AGW over TCP, such as Dire Wolf or Graywolf.",
           "APRS-IS server, port, passcode, and receive filter.",
           "Beacon latitude, longitude, and symbol.",
           "Remote Web Control port and launch behavior.",
@@ -103,37 +103,37 @@ export const HELP_SECTIONS: HelpSection[] = [
           "Theme: System, Light, or Dark.",
           "Play Sound: system alert sound for direct inbound messages addressed to you (macOS only; a no-op on Windows and Linux).",
           "Message Font Size: slider to resize sent and received message text (10–32px).",
-          "Latitude, Longitude, Symbol: used for manual beacons and auto-beacon on connect.",
+          "Latitude, Longitude, Symbol: used by the Beacon button and by automatic beacons.",
         ],
       },
       {
         type: "callout",
         tone: "warning",
         title: "Auto-beacon behavior",
-        text: "If beacon coordinates are filled in, APRSWolf sends one position beacon when a TNC connection becomes active. Clear the beacon fields if you do not want that automatic transmit.",
+        text: "Automatic beacons are off by default. Check Beacon on connect to send one each time a connection is made, and set Auto-beacon every to send one on a timer. Both need beacon coordinates and a symbol.",
       },
     ],
   },
   {
     id: "tnc",
     title: "TNC Mode",
-    summary: "Use Dire Wolf or another compatible TCP TNC for RF messaging.",
+    summary: "Use any TNC that offers KISS and AGW over TCP, such as Dire Wolf or Graywolf, for RF messaging.",
     blocks: [
       {
         type: "steps",
         items: [
-          "Enter the host running Dire Wolf.",
-          "Enter the configured TCP port.",
+          "Enter the host running your TNC.",
+          "Enter its KISS TCP port (8001 by default). APRSWolf sends over KISS and receives over the AGW port one below it (8000 by default).",
           "Click Connect TNC.",
-          "Wait for TX and RX status to show an active connection.",
+          "Wait for the dot beside TNC in the bottom bar to turn green.",
         ],
       },
       {
         type: "list",
         title: "Useful checks",
         items: [
-          "Make sure Dire Wolf is already running.",
-          "Confirm the port matches your Dire Wolf TCP setting.",
+          "Make sure the TNC is already running, with both KISS and AGW turned on.",
+          "Confirm the port matches the TNC's KISS port (KISSPORT in Dire Wolf), and that its AGW port is one below (AGWPORT).",
           "Use a path such as WIDE1-1,WIDE2-1 only when transmitting over RF.",
         ],
       },
@@ -317,7 +317,7 @@ export const HELP_SECTIONS: HelpSection[] = [
         title: "If something is not working",
         items: [
           "No response from a station or bot: verify Message To, transport, and RF path for your area.",
-          "Cannot connect to TNC: confirm Dire Wolf is running and the host/port are correct.",
+          "Cannot connect to TNC: confirm the TNC is running and the host/port are correct.",
           "Cannot connect to APRS-IS: check server, port, base callsign, and passcode.",
           "Too much traffic: tighten the APRS-IS filter instead of running unfiltered.",
           "No alert sound: only direct messages addressed to your station trigger the sound.",

@@ -6,8 +6,8 @@ APRSWolf is a desktop app for APRS messaging. It runs on macOS, Windows, and Lin
 
 You can use it in two ways:
 
-- TNC mode: connect to a local or networked Dire Wolf instance over TCP
-- APRS-IS mode: connect directly to an APRS-IS server over the internet
+- TNC mode: connect to a local or networked TNC over TCP. Any TNC that offers KISS and AGW over TCP works, such as Dire Wolf or Graywolf. APRSWolf doesn't include one.
+- APRS-IS mode: connect directly to an APRS-IS server over the internet, with no radio
 
 Only one connection mode can be active at a time.
 
@@ -45,7 +45,7 @@ Recommended for most users:
 2. Open `Preferences` with the gear (⚙︎) at the top right of the main window, or from the app menu (macOS: `APRSWolf > Preferences`; Windows/Linux: the Preferences item in the app menu).
 3. Enter your callsign and save at least one connection path.
 4. Choose one connection mode from the main window:
-	- `Connect TNC` for Dire Wolf / RF use
+	- `Connect TNC` for RF use through your TNC
 	- `Connect APRS-IS` for internet APRS use
 5. Enter the destination callsign in `Message To`.
 6. Type your message and click `Send`.
@@ -96,16 +96,23 @@ Use `Preferences` for all saved setup. The main window is intended for live conn
 - Callsign: your APRS callsign, including SSID if needed, such as `WT1W-15`
 - Digi Path: the digipeater path to use for RF messaging; the default is `WIDE1-1,WIDE2-1`
 - Theme: `System`, `Light`, or `Dark`
-- Message Sound: plays the system alert sound for messages addressed to you (macOS only; a no-op on Windows and Linux)
+- Play sound for direct inbound messages: plays the system alert sound for messages addressed to you (macOS only; a no-op on Windows and Linux)
+- Show unread To Me count on the app icon: on by default; turn it off to keep the dock or taskbar icon plain
 - Message Font Size: slider to resize sent and received message text (range 10–32px, default 15px)
-- Beacon Latitude / Longitude / Symbol: used when sending a manual beacon
+- Beacon Latitude / Longitude / Symbol: used by the `Beacon` button and by automatic beacons
+
+### Message History Settings
+
+- Keep positions, weather and other short-lived packets for: 1 day, 7 days (the default), 30 days, or Keep everything. Messages, queries, and bulletins are always kept until you clear them.
 
 ### TNC Settings
 
-Use this when talking to Dire Wolf over TCP.
+Use this when talking to a TNC over TCP.
 
-- Host: defaults to `127.0.0.1` for Dire Wolf on this computer; change it if Dire Wolf is on another machine
-- Port: defaults to `8001`; change it to the KISS or compatible TCP port configured in Dire Wolf
+- Host: defaults to `127.0.0.1` for a TNC on this computer; change it if the TNC runs on another machine
+- Port: defaults to `8001`; change it to the TNC's KISS TCP port (`KISSPORT` in Dire Wolf)
+
+APRSWolf sends over the KISS port and receives over the AGW port, which must be one below it (`8000` by default; `AGWPORT` in Dire Wolf). Turn both on in the TNC, or you can send but won't see traffic.
 
 ### APRS-IS Settings
 
@@ -280,7 +287,7 @@ The `Show ACKs` checkbox controls whether APRS ACK frames appear in the received
 
 ## Message Sound
 
-When `Message Sound` is enabled:
+When `Play sound for direct inbound messages` is checked in Preferences:
 
 - APRSWolf plays the system alert sound (macOS only; on Windows and Linux this is a no-op)
 - Only direct messages addressed to your callsign trigger the sound
@@ -371,9 +378,9 @@ Escape closes Preferences, Help, and About.
 
 ### Main APRSWolf Window
 
-This is the main app layout with station settings, connection controls, send form, and the sent/received panes.
+This is the main window: the send row, the Sent and Received panes with the filter chips, and the bottom bar with Station, TNC, APRS-IS, and Remote Web Control.
 
-![APRSWolf Main Window](images/aprswolf-main-interface.png)
+![APRSWolf Main Window](images/aprswolf-readme.png)
 
 ### In-App Help Window
 
@@ -385,7 +392,7 @@ This is the built-in Help window with topic navigation, search, and task-focused
 
 The remote control page gives you browser-based access to the same saved station and connection setup used by the desktop app.
 
-![APRSWolf Remote Web Control](../Screenshot%202026-04-03%20at%2014.12.15.png)
+![APRSWolf Remote Web Control](images/aprswolf-remote.png)
 
 What you can do from this page:
 
@@ -423,22 +430,22 @@ The remote token is empty by default, which restricts the server to this compute
 
 ## Everyday Use Tips
 
-- Use TNC mode for RF messaging through Dire Wolf
+- Use TNC mode for RF messaging through your TNC
 - Use APRS-IS mode for internet APRS messaging
 - Keep `Show ACKs` off unless you are troubleshooting
 - Leave theme on `System` unless you want a fixed look
-- Leave `Message Sound` on if you want an audible alert for direct messages
+- Leave `Play sound for direct inbound messages` on if you want an audible alert for direct messages
 
 ## Troubleshooting
 
-### I cannot connect to Dire Wolf
+### I cannot connect to the TNC
 
 Check the following:
 
-- Dire Wolf is running
-- the TCP port is correct
-- your computer can reach the Dire Wolf host
-- Dire Wolf is configured to allow the KISS or compatible TCP connection you are using
+- the TNC is running
+- the TCP port is its KISS port
+- your computer can reach the TNC's host
+- the TNC has KISS over TCP turned on, and AGW one port below it (in Dire Wolf, `KISSPORT` and `AGWPORT` in `direwolf.conf`)
 
 ### I am connected but not seeing traffic
 
@@ -452,7 +459,7 @@ Check the following:
 
 Check the following:
 
-- `Message Sound` is enabled
+- `Play sound for direct inbound messages` is checked in Preferences
 - you are on macOS (the alert sound is macOS only; it is a no-op on Windows and Linux)
 - the message is actually addressed to your station
 - the packet is not just an ACK
@@ -483,7 +490,8 @@ APRSWolf automatically saves:
 - connection settings
 - theme selection
 - ACK visibility preference
-- message sound preference
-- received message history
+- message sound and app icon count preferences
+- message history retention
+- sent and received message history, in `messages.db` in the app data folder
 
 You should not need to re-enter your normal setup every time you launch the app.

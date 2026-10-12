@@ -340,7 +340,7 @@ function PreferencesWindow() {
         </section>
 
         <section className="panel preferences-panel prefs-tnc">
-          <h2 className="section-title">TNC (Dire Wolf)</h2>
+          <h2 className="section-title">TNC</h2>
           <div className="preferences-grid preferences-grid-two">
             <label>
               Host

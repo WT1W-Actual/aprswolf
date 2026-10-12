@@ -35,4 +35,4 @@ is pushed. Each release attaches artifacts for all supported platforms:
 Note: the macOS `aarch64` DMG is for Apple Silicon Macs; the Linux `arm64`
 packages are for ARM64 Linux. They are not interchangeable.
 
-See the [project README](../../README.md#releases) for the full artifact table.
+See the [project README](../../README.md#download) for the full artifact table.

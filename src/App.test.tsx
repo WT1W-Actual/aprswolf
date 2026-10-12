@@ -165,7 +165,7 @@ describe("App", () => {
   it("renders initial disconnected state and disabled send", async () => {
     render(<App />);
 
-    expect(await screen.findByRole("heading", { name: "TNC (Dire Wolf)" })).toHaveAttribute(
+    expect(await screen.findByRole("heading", { name: "TNC" })).toHaveAttribute(
       "title",
       expect.stringMatching(/mutually exclusive/i),
     );
@@ -227,7 +227,7 @@ describe("App", () => {
 
   it("invokes connect_tnc when Connect is clicked", async () => {
     render(<App />);
-    await screen.findByRole("heading", { name: "TNC (Dire Wolf)" });
+    await screen.findByRole("heading", { name: "TNC" });
     fireEvent.click(screen.getByRole("button", { name: "Connect TNC" }));
 
     expect(invokeMock).toHaveBeenCalledWith("connect_tnc", {
@@ -246,7 +246,7 @@ describe("App", () => {
     const statusHandler = statusCall[1] as (event: unknown) => void;
     statusHandler({ payload: { state: "tx_connecting", detail: "172.16.2.201:8001" } });
 
-    const tncHeading = screen.getByRole("heading", { name: "TNC (Dire Wolf)" });
+    const tncHeading = screen.getByRole("heading", { name: "TNC" });
     const tncSection = tncHeading.closest(".config-group") as HTMLElement;
 
     await waitFor(() => {
@@ -281,7 +281,7 @@ describe("App", () => {
     });
 
     render(<App />);
-    await screen.findByRole("heading", { name: "TNC (Dire Wolf)" });
+    await screen.findByRole("heading", { name: "TNC" });
 
     const statusCall = listenMock.mock.calls.find((call: any) => call[0] === "tnc_status");
     if (statusCall?.[1]) {
@@ -1107,7 +1107,7 @@ describe("App", () => {
 
     render(<App />);
 
-    const tncHeadings = await screen.findAllByRole("heading", { name: "TNC (Dire Wolf)" });
+    const tncHeadings = await screen.findAllByRole("heading", { name: "TNC" });
     const tncHeading = tncHeadings[tncHeadings.length - 1];
     const tncSection = tncHeading?.closest(".config-group");
     expect(tncSection).toBeTruthy();

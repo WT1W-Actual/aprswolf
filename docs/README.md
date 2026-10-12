@@ -20,6 +20,7 @@ Use the end-user guide for:
 - first-time setup
 - connecting with TNC or APRS-IS
 - sending and receiving messages
+- searching, clearing, exporting, and importing message history
 - theme and sound settings
 - remote web control
 - troubleshooting
@@ -42,10 +43,10 @@ Use the releases index and template for:
 - upgrade notes
 - known issues tracking
 
-## Typical Workflow
+## Release Workflow
 
-1. Read [END-USER-GUIDE.md](END-USER-GUIDE.md) for product usage documentation.
-2. Update the package, Cargo, and Tauri versions together.
-3. Copy [RELEASE-NOTES-TEMPLATE.md](RELEASE-NOTES-TEMPLATE.md) into `docs/releases/X.Y.Z.md` and describe user-visible changes.
-4. Add the new release file to [releases/README.md](releases/README.md).
-5. Run verification and either build on each target OS or push a `v*` tag to run the multi-platform release workflow.
+1. Update the package, Cargo, and Tauri versions together.
+2. Copy [RELEASE-NOTES-TEMPLATE.md](RELEASE-NOTES-TEMPLATE.md) into `docs/releases/X.Y.Z.md` and describe user-visible changes.
+3. Add the new release file to [releases/README.md](releases/README.md).
+4. Check that the README download table, END-USER-GUIDE.md, and IN-APP-HELP.md describe the release.
+5. Run `npm run verify` and either build on each target OS or push a `v*` tag to run the multi-platform release workflow.
