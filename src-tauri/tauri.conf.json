@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "APRSWolf",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "identifier": "com.jperry.aprswolf",
   "build": {
     "beforeDevCommand": "npm run dev",
@@ -35,6 +35,9 @@
       "icons/icon.ico"
     ],
     "category": "Utility",
+    "macOS": {
+      "signingIdentity": "-"
+    },
     "shortDescription": "APRS messaging over KISS/AGW TCP and APRS-IS",
     "longDescription": "APRSWolf is a desktop client for APRS messaging over KISS/AGW TCP (Dire Wolf compatible) and APRS-IS.",
     "linux": {

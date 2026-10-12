@@ -52,7 +52,9 @@ needs one extra click:
 
 - **macOS:** open the `.dmg` and drag APRSWolf to Applications. If macOS
   says it can't verify the app, open System Settings → Privacy &
-  Security, scroll down, and click **Open Anyway**.
+  Security, scroll down, and click **Open Anyway**. If it says the app is
+  "damaged" (v1.0.2 and earlier), install v1.0.3 or run
+  `xattr -cr /Applications/APRSWolf.app` once.
 - **Windows:** if SmartScreen says it protected your PC, click
   **More info**, then **Run anyway**.
 - **Linux AppImage:** make it executable first
@@ -92,7 +94,7 @@ The [End User Guide](docs/END-USER-GUIDE.md) walks through the rest.
 - In-app help reference: see [docs/IN-APP-HELP.md](docs/IN-APP-HELP.md)
 - Release notes template: see [docs/RELEASE-NOTES-TEMPLATE.md](docs/RELEASE-NOTES-TEMPLATE.md)
 - Release index: see [docs/releases/README.md](docs/releases/README.md)
-- Current release notes: see [docs/releases/1.0.2.md](docs/releases/1.0.2.md)
+- Current release notes: see [docs/releases/1.0.3.md](docs/releases/1.0.3.md)
 - Developers: use the build and test notes below
 
 ## What It Does

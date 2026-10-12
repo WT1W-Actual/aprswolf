@@ -70,6 +70,7 @@ On Linux, use the `arm64` packages on ARM64 hardware such as a 64-bit Raspberry 
 2. Drag APRSWolf into your Applications folder.
 3. Open APRSWolf from Applications.
 4. If macOS warns that the app was downloaded from the internet, open System Settings → Privacy & Security, scroll down, and click **Open Anyway**.
+5. If macOS says APRSWolf "is damaged and can't be opened" (builds before v1.0.3), install v1.0.3 or newer, or run `xattr -cr /Applications/APRSWolf.app` in Terminal and open it again.
 
 ### Windows
 
