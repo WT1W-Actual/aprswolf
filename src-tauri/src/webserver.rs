@@ -50,6 +50,7 @@ struct RemoteStateSnapshot {
     manual_beacon_cooldown_remaining_sec: u64,
     queue: Vec<crate::tnc::QueueSnapshot>,
     received: Vec<serde_json::Value>,
+    sent: Vec<serde_json::Value>,
 }
 
 #[derive(Clone)]
@@ -266,6 +267,7 @@ async fn snapshot(app: &AppHandle) -> Result<RemoteStateSnapshot, String> {
         manual_beacon_cooldown_remaining_sec: crate::tnc::get_manual_beacon_cooldown_remaining(app.clone()),
         queue: crate::tnc::inspect_queue_for_app(app.clone()).await?,
         received: crate::message_store::recent(app),
+        sent: crate::message_store::recent_sent(app),
     })
 }
 

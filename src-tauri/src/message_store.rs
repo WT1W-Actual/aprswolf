@@ -686,6 +686,11 @@ pub fn search_sent_messages(
     with_store(&app, |store| search_sent(&store.conn, &query, before_seq, limit).map_err(|err| err.to_string()))
 }
 
+/// The newest page of sent messages, for the web remote's state snapshot.
+pub fn recent_sent(app: &AppHandle) -> Vec<Value> {
+    with_store(app, |store| sent_page(&store.conn, None, PAGE_SIZE).map_err(|err| err.to_string())).unwrap_or_default()
+}
+
 /// The newest page of history, for the web remote's state snapshot.
 pub fn recent(app: &AppHandle) -> Vec<Value> {
     with_store(app, |store| page(&store.conn, None, PAGE_SIZE).map_err(|err| err.to_string())).unwrap_or_default()
