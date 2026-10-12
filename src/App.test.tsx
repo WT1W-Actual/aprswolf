@@ -941,6 +941,8 @@ describe("PreferencesWindow", () => {
 
     fireEvent.change(callsignInput, { target: { value: "ab1cde-7" } });
     expect(callsignInput.value).toBe("AB1CDE-7");
+    // The guidance stays on screen once the field has text.
+    expect(screen.getByText("Your callsign with SSID, e.g. W1AW-9")).toBeInTheDocument();
 
     const pathInput = screen.getByPlaceholderText("WIDE1-1,WIDE2-1") as HTMLInputElement;
     fireEvent.change(pathInput, { target: { value: "wide1-1,wide2-2" } });
