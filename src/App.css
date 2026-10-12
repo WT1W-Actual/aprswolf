@@ -291,6 +291,16 @@ input {
   line-height: 1;
 }
 
+/* The full-width text field rule above must not stretch checkboxes: a
+   stretched box pushes its label text to the far side of the row. */
+input[type="checkbox"],
+input[type="radio"] {
+  width: auto;
+  height: auto;
+  padding: 0;
+  flex: none;
+}
+
 input:focus {
   outline: none;
   border-color: #007AFF;
@@ -900,6 +910,132 @@ form.preferences-window-body .preferences-grid-four {
   line-height: 1.35;
 }
 
+/* A message row with its controls. × (and ↺ on a hidden search result)
+   shows on hover or keyboard focus, centered on the row's right edge in a
+   gutter the row keeps clear, so it never covers a badge or the text. */
+.msg-row {
+  position: relative;
+}
+
+.msg-row > .msg-item {
+  padding-right: 30px;
+}
+
+.msg-row.has-restore > .msg-item {
+  padding-right: 116px;
+}
+
+/* While selecting, a checkbox sits at the row's left edge. */
+.msg-row.selecting {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.msg-row.selecting > .msg-item {
+  flex: 1;
+  min-width: 0;
+  user-select: none;
+}
+
+.msg-select-box {
+  margin: 0;
+  cursor: pointer;
+}
+
+.msg-row-actions {
+  position: absolute;
+  right: 5px;
+  top: 50%;
+  transform: translateY(-50%);
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+/* The buttons appear on hover or focus; the HIDDEN label always shows. */
+.msg-row-btn {
+  opacity: 0;
+  transition: opacity 0.12s;
+}
+
+.msg-row:hover .msg-row-btn,
+.msg-row-actions:focus-within .msg-row-btn {
+  opacity: 1;
+}
+
+.msg-row-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  padding: 0 0 1px;
+  border-radius: 10px;
+  font-size: 15px;
+  line-height: 1;
+  background: rgba(120, 120, 128, 0.2);
+  color: #3c3c43;
+  border: none;
+}
+
+.msg-clear-btn:hover {
+  background: rgba(255, 59, 48, 0.85);
+  color: #fff;
+}
+
+.msg-restore-btn {
+  font-size: 13px;
+}
+
+.msg-restore-btn:hover {
+  background: rgba(0, 122, 255, 0.85);
+  color: #fff;
+}
+
+.msg-select-count {
+  font-size: 12px;
+  color: #8e8e93;
+  white-space: nowrap;
+}
+
+/* Clear all sits beside a pane title as plain text, not a filled button. */
+.msg-clear-all-btn {
+  height: 22px;
+  padding: 0 6px;
+  font-size: 12px;
+  background: transparent;
+  color: #8e8e93;
+  border: none;
+}
+
+.msg-clear-all-btn:hover {
+  color: #ff3b30;
+}
+
+/* Done (leaving selection) is not destructive, so it does not turn red. */
+.msg-select-count + .msg-clear-all-btn:hover {
+  color: #007aff;
+}
+
+.clear-dialog-option {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+}
+
+.clear-dialog-note {
+  margin: 0;
+  font-size: 12px;
+  color: #6c6c70;
+  line-height: 1.45;
+}
+
+button.danger {
+  background: #ff3b30;
+}
+
 .sent-item {
   background: rgba(111, 62, 160, 0.05);
 }
@@ -928,9 +1064,11 @@ form.preferences-window-body .preferences-grid-four {
   background: rgba(34, 111, 90, 0.14);
 }
 
+/* Badges are smaller than the line's text, so center them on it; baseline
+   alignment sits them low. */
 .msg-item-top-row {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   gap: 6px;
   flex-wrap: nowrap;
   overflow: hidden;
@@ -1012,8 +1150,8 @@ form.preferences-window-body .preferences-grid-four {
   white-space: nowrap;
 }
 
-/* A search hit cleared from the list but kept in the database. It takes the
-   status badge's push to the right edge so the two sit together. */
+/* A search hit cleared from the list but kept in the database, shown in
+   the row's right-hand controls. */
 .msg-hidden-badge {
   font-size: 10px;
   padding: 1px 4px;
@@ -1024,11 +1162,6 @@ form.preferences-window-body .preferences-grid-four {
   text-transform: uppercase;
   white-space: nowrap;
   flex-shrink: 0;
-  margin-left: auto;
-}
-
-.msg-hidden-badge + .msg-badge {
-  margin-left: 0;
 }
 
 .msg-badge.queued  { background: #e8f0fa; color: #4a6fa5; }
@@ -1272,6 +1405,15 @@ form.preferences-window-body .preferences-grid-four {
 :root[data-theme="dark"] .app-header h1,
 :root[data-theme="dark"] .header-status {
   color: #e4e6eb;
+}
+
+:root[data-theme="dark"] .msg-row-btn {
+  background: rgba(142, 142, 147, 0.3);
+  color: #e4e6eb;
+}
+
+:root[data-theme="dark"] .clear-dialog-note {
+  color: #a1a1a6;
 }
 
 :root[data-theme="dark"] .header-clock {

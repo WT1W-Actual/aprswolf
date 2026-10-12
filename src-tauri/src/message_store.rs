@@ -15,6 +15,11 @@
 //! its sender, addressee, body, and APRS message number, and a packet whose
 //! fingerprint was stored within `DUPLICATE_WINDOW_MS` is not stored again.
 //!
+//! Messages can be cleared from either list, always by naming them: one,
+//! a selected set, or everything a list shows. A cleared message is hidden: it leaves the list but stays in the database,
+//! and search still finds it, marked as hidden. Clearing with delete removes
+//! it from the database.
+//!
 //! Sent messages live in their own table, one row per message keyed by a
 //! UUID, with the delivery status (queued, sent, acked, failed, expired)
 //! updated as it changes. They are conversation, so retention never trims
@@ -334,7 +339,8 @@ fn record(conn: &Connection, message: &Value, now: i64) -> rusqlite::Result<(Str
 
     let latest = conn
         .query_row(
-            "SELECT seq, uuid, timestamp, from_call, to_call, body, data FROM received ORDER BY seq DESC LIMIT 1",
+            "SELECT seq, uuid, timestamp, from_call, to_call, body, data FROM received WHERE hidden = 0
+             ORDER BY seq DESC LIMIT 1",
             [],
             |row| {
                 Ok(LatestRow {
@@ -401,21 +407,23 @@ fn prune(conn: &Connection, retention_days: u32, now: i64) -> rusqlite::Result<u
     conn.execute("DELETE FROM received WHERE keep = 0 AND stored_at < ?1", params![cutoff])
 }
 
-fn row_to_value(data: String, seq: i64) -> Value {
+fn row_to_value(data: String, seq: i64, hidden: bool) -> Value {
     let mut value: Value = serde_json::from_str(&data).unwrap_or(Value::Null);
     if let Some(obj) = value.as_object_mut() {
         obj.insert("seq".to_string(), Value::from(seq));
+        obj.insert("hidden".to_string(), Value::Bool(hidden));
     }
     value
 }
 
-/// One page of history, newest first, older than `before_seq` when given.
+/// One page of the list, newest first, older than `before_seq` when given.
+/// Hidden rows are left out.
 fn page(conn: &Connection, before_seq: Option<i64>, limit: usize) -> rusqlite::Result<Vec<Value>> {
     let mut stmt = conn.prepare(
-        "SELECT data, seq FROM received WHERE seq < ?1 ORDER BY seq DESC LIMIT ?2",
+        "SELECT data, seq, hidden FROM received WHERE hidden = 0 AND seq < ?1 ORDER BY seq DESC LIMIT ?2",
     )?;
     let rows = stmt.query_map(params![before_seq.unwrap_or(i64::MAX), limit as i64], |row| {
-        Ok(row_to_value(row.get(0)?, row.get(1)?))
+        Ok(row_to_value(row.get(0)?, row.get(1)?, row.get(2)?))
     })?;
     rows.collect()
 }
@@ -437,18 +445,19 @@ fn fts_query(input: &str) -> Option<String> {
     }
 }
 
-/// Rows whose callsigns or text match every word in `query`, newest first.
+/// Rows whose callsigns or text match every word in `query`, newest first,
+/// hidden ones included.
 fn search(conn: &Connection, query: &str, before_seq: Option<i64>, limit: usize) -> rusqlite::Result<Vec<Value>> {
     let Some(fts) = fts_query(query) else {
         return Ok(Vec::new());
     };
     let mut stmt = conn.prepare(
-        "SELECT r.data, r.seq FROM received_fts f JOIN received r ON r.seq = f.rowid
+        "SELECT r.data, r.seq, r.hidden FROM received_fts f JOIN received r ON r.seq = f.rowid
          WHERE received_fts MATCH ?1 AND r.seq < ?2
          ORDER BY r.seq DESC LIMIT ?3",
     )?;
     let rows = stmt.query_map(params![fts, before_seq.unwrap_or(i64::MAX), limit as i64], |row| {
-        Ok(row_to_value(row.get(0)?, row.get(1)?))
+        Ok(row_to_value(row.get(0)?, row.get(1)?, row.get(2)?))
     })?;
     rows.collect()
 }
@@ -555,10 +564,11 @@ fn sent_row_to_value(row: &rusqlite::Row) -> rusqlite::Result<Value> {
     }))
 }
 
-/// One page of sent messages, newest first, older than `before_seq` when given.
+/// One page of the sent list, newest first, older than `before_seq` when
+/// given. Hidden rows are left out.
 fn sent_page(conn: &Connection, before_seq: Option<i64>, limit: usize) -> rusqlite::Result<Vec<Value>> {
     let mut stmt = conn.prepare(&format!(
-        "SELECT {SENT_COLUMNS} FROM sent s WHERE s.seq < ?1 ORDER BY s.seq DESC LIMIT ?2"
+        "SELECT {SENT_COLUMNS} FROM sent s WHERE s.hidden = 0 AND s.seq < ?1 ORDER BY s.seq DESC LIMIT ?2"
     ))?;
     let rows = stmt.query_map(params![before_seq.unwrap_or(i64::MAX), limit as i64], sent_row_to_value)?;
     rows.collect()
@@ -590,6 +600,78 @@ pub fn record_sent(app: &AppHandle, rec: &SentRecord) {
 pub fn load_sent_messages(app: AppHandle, before_seq: Option<i64>, limit: Option<usize>) -> Vec<Value> {
     let limit = limit.unwrap_or(PAGE_SIZE).min(PAGE_SIZE);
     with_store(&app, |store| sent_page(&store.conn, before_seq, limit).map_err(|err| err.to_string())).unwrap_or_default()
+}
+
+/// Which list a clear applies to.
+#[derive(Clone, Copy, Debug, serde::Deserialize, PartialEq)]
+#[serde(rename_all = "lowercase")]
+pub enum MessageList {
+    Sent,
+    Received,
+}
+
+impl MessageList {
+    fn table(self) -> &'static str {
+        match self {
+            MessageList::Sent => "sent",
+            MessageList::Received => "received",
+        }
+    }
+}
+
+/// Hide the named messages from a list, or delete them from the database
+/// when `delete` is set. There is deliberately no "every row" form: a clear
+/// only ever touches messages the window listed. Returns how many rows
+/// changed.
+fn clear(conn: &Connection, list: MessageList, uuids: &[String], delete: bool) -> rusqlite::Result<usize> {
+    let table = list.table();
+    let action = if delete {
+        format!("DELETE FROM {table}")
+    } else {
+        format!("UPDATE {table} SET hidden = 1")
+    };
+    let tx = conn.unchecked_transaction()?;
+    let mut changed = 0;
+    {
+        let mut stmt = tx.prepare(&format!("{action} WHERE uuid = ?1"))?;
+        for uuid in uuids {
+            changed += stmt.execute(params![uuid])?;
+        }
+    }
+    tx.commit()?;
+    Ok(changed)
+}
+
+/// Put hidden messages back in their list.
+fn restore(conn: &Connection, list: MessageList, uuids: &[String]) -> rusqlite::Result<usize> {
+    let tx = conn.unchecked_transaction()?;
+    let mut changed = 0;
+    {
+        let mut stmt = tx.prepare(&format!("UPDATE {} SET hidden = 0 WHERE uuid = ?1 AND hidden = 1", list.table()))?;
+        for uuid in uuids {
+            changed += stmt.execute(params![uuid])?;
+        }
+    }
+    tx.commit()?;
+    Ok(changed)
+}
+
+/// Unhide the named messages so their list shows them again.
+#[tauri::command]
+pub fn restore_messages(app: AppHandle, list: MessageList, uuids: Vec<String>) -> Result<usize, String> {
+    with_store(&app, |store| restore(&store.conn, list, &uuids).map_err(|err| err.to_string()))
+}
+
+/// Clear the named messages from a list: hidden by default, deleted from the
+/// database when `delete` is set.
+#[tauri::command]
+pub fn clear_messages(app: AppHandle, list: MessageList, uuids: Vec<String>, delete: bool) -> Result<usize, String> {
+    with_store(&app, |store| {
+        let changed = clear(&store.conn, list, &uuids, delete).map_err(|err| err.to_string())?;
+        // A later copy of a cleared packet should not be matched to its row.
+        store.recent = RecentPackets::default();
+        Ok(changed)
+    })
 }
 
 /// Full-text search over sent messages' addressees and text.
@@ -757,6 +839,63 @@ mod tests {
         assert_eq!(status("s-s"), "expired");
         assert_eq!(status("s-a"), "acked");
         assert_eq!(status("s-f"), "failed");
+    }
+
+    #[test]
+    fn hidden_messages_leave_the_list_and_stay_searchable() {
+        let conn = memory_db();
+        let (keep, _) = record(&conn, &message("N6TEST-7", Some("WT1W-15"), "Keep this one", "msg"), 1_000).unwrap();
+        let (gone, _) = record(&conn, &message("K6TEST-9", Some("WT1W-15"), "Hide this one", "msg"), 2_000).unwrap();
+        assert_eq!(clear(&conn, MessageList::Received, &[gone.clone()], false).unwrap(), 1);
+        let listed = page(&conn, None, 200).unwrap();
+        assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0]["uuid"], keep.as_str());
+        assert_eq!(listed[0]["hidden"], false);
+        let hits = search(&conn, "hide", None, 200).unwrap();
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0]["hidden"], true);
+    }
+
+    #[test]
+    fn restored_messages_return_to_the_list() {
+        let conn = memory_db();
+        upsert_sent(&conn, &sent("a", "N6TEST-7", "acked", 1), 1_000).unwrap();
+        clear(&conn, MessageList::Sent, &["a".to_string()], false).unwrap();
+        assert!(sent_page(&conn, None, 200).unwrap().is_empty());
+        assert_eq!(restore(&conn, MessageList::Sent, &["a".to_string()]).unwrap(), 1);
+        let listed = sent_page(&conn, None, 200).unwrap();
+        assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0]["hidden"], false);
+    }
+
+    #[test]
+    fn deleted_messages_are_gone_from_list_and_search() {
+        let conn = memory_db();
+        let (gone, _) = record(&conn, &message("K6TEST-9", Some("WT1W-15"), "Delete this one", "msg"), 1_000).unwrap();
+        assert_eq!(clear(&conn, MessageList::Received, &[gone], true).unwrap(), 1);
+        assert!(page(&conn, None, 200).unwrap().is_empty());
+        assert!(search(&conn, "delete", None, 200).unwrap().is_empty());
+    }
+
+    #[test]
+    fn clearing_a_set_touches_only_the_named_messages() {
+        let conn = memory_db();
+        for (i, uuid) in ["a", "b", "c"].iter().enumerate() {
+            upsert_sent(&conn, &sent(uuid, "N6TEST-7", "acked", 1), 1_000 + i as i64).unwrap();
+        }
+        assert_eq!(clear(&conn, MessageList::Sent, &["a".to_string(), "c".to_string()], true).unwrap(), 2);
+        let listed = sent_page(&conn, None, 200).unwrap();
+        assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0]["uuid"], "b");
+    }
+
+    #[test]
+    fn a_new_part_never_joins_a_hidden_row() {
+        let conn = memory_db();
+        let (first, _) = record(&conn, &message("N6TEST-7", Some("WT1W-15"), "Heading out,", "msg"), 1_000).unwrap();
+        clear(&conn, MessageList::Received, &[first.clone()], false).unwrap();
+        let (second, _) = record(&conn, &message("N6TEST-7", Some("WT1W-15"), "back at noon", "msg"), 2_000).unwrap();
+        assert_ne!(first, second);
     }
 
     #[test]

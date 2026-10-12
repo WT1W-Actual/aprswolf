@@ -1,4 +1,4 @@
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { publishUiLog } from "./logBus";
 import {
@@ -10,20 +10,36 @@ import { useTheme } from "./lib/useTheme";
 import { useToMeUnread } from "./lib/useToMeUnread";
 import {
   PAGE_SIZE,
+  clearMessages,
   dedupeByUuid,
+  dropCleared,
   formatReceivedTime,
+  insertRestored,
+  markCleared,
+  markRestored,
   mergeTimeline,
+  restoreMessages,
+  type MessageGroups,
+  type TimelineEntry,
   oldestSeq,
   useMessageSearch,
   withFreshIds,
 } from "./lib/messageHistory";
 import { useWindowFocused } from "./lib/useWindowFocused";
 import UnreadDot from "./UnreadDot";
+import ClearDialog, { type ClearRequest } from "./ClearDialog";
+import MessageRowActions from "./MessageRowActions";
+import { rowClass, SelectBox, SelectionHeader } from "./MessageSelection";
+import { useSelection } from "./lib/useSelection";
 import {
   publishPopoutFocus,
   publishReceivedWindowState,
+  subscribeMessagesCleared,
+  subscribeMessagesRestored,
   subscribeReceivedSnapshots,
   subscribeSentSnapshots,
+  type MessagesCleared,
+  type MessagesRestored,
   type ReceivedItem,
   type SentItem,
 } from "./receivedBus";
@@ -283,6 +299,90 @@ function ReceivedWindow() {
 
   const canLoadMore = receivedHasMore || sentHasMore;
 
+  // Clearing and restoring messages, from this window or the main one.
+  const [clearRequest, setClearRequest] = useState<ClearRequest | null>(null);
+  const selection = useSelection(clearRequest !== null);
+  const applyClearedRef = useRef<(cleared: MessagesCleared) => void>(() => {});
+  applyClearedRef.current = (cleared) => {
+    if (cleared.list === "sent") {
+      setSentItems((prev) => dropCleared(prev, cleared));
+      setOlderSent((prev) => dropCleared(prev, cleared));
+      sentSearch.update((prev) => markCleared(prev, cleared));
+    } else {
+      setReceivedItems((prev) => dropCleared(prev, cleared));
+      setOlderItems((prev) => dropCleared(prev, cleared));
+      search.update((prev) => markCleared(prev, cleared));
+    }
+  };
+  const applyRestoredRef = useRef<(restored: MessagesRestored) => void>(() => {});
+  applyRestoredRef.current = (restored) => {
+    const uuids = restored.items.map((item) => item.uuid).filter((uuid): uuid is string => Boolean(uuid));
+    if (restored.list === "sent") {
+      setSentItems((prev) => insertRestored(prev, restored.items));
+      sentSearch.update((prev) => markRestored(prev, uuids));
+    } else {
+      setReceivedItems((prev) => insertRestored(prev, restored.items));
+      search.update((prev) => markRestored(prev, uuids));
+    }
+  };
+  useEffect(() => subscribeMessagesCleared((cleared) => applyClearedRef.current(cleared)), []);
+  useEffect(() => subscribeMessagesRestored((restored) => applyRestoredRef.current(restored)), []);
+
+  // Selection keys carry the direction, since this list holds both.
+  const entryKey = (entry: TimelineEntry) => `${entry.direction}:${entry.item.uuid ?? ""}`;
+  const groupsOf = (entries: TimelineEntry[]): MessageGroups => ({
+    sent: entries.flatMap((entry) => (entry.direction === "sent" ? [entry.item] : [])),
+    received: entries.flatMap((entry) => (entry.direction === "received" ? [entry.item] : [])),
+  });
+
+  // The rows an x or restore control acts on: every selected row when this
+  // row is selected, otherwise the row alone.
+  function targetsFor(entry: TimelineEntry): TimelineEntry[] {
+    if (selection.active && selection.isSelected(entryKey(entry))) {
+      return timeline.filter((other) => other.item.uuid && selection.isSelected(entryKey(other)));
+    }
+    return [entry];
+  }
+
+  function askClear(entries: TimelineEntry[], what: string) {
+    if (entries.length === 0) return;
+    setClearRequest({
+      what,
+      alreadyHidden: entries.every((entry) => entry.item.hidden),
+      run: async (deleted) => {
+        try {
+          (await clearMessages(groupsOf(entries), deleted)).forEach((cleared) => applyClearedRef.current(cleared));
+          selection.exit();
+        } catch (error) {
+          publishUiLog("error", `clear failed: ${String(error)}`);
+        }
+      },
+    });
+  }
+
+  function askClearEntry(entry: TimelineEntry) {
+    const targets = targetsFor(entry);
+    askClear(targets, targets.length === 1 ? "this message" : `these ${targets.length} messages`);
+  }
+
+  // Clear all takes exactly what the list shows now, sent and received,
+  // never older history.
+  function askClearAll() {
+    const shown = timeline.filter((entry) => !entry.item.hidden);
+    askClear(shown, `the ${shown.length} message${shown.length === 1 ? "" : "s"} shown`);
+  }
+
+  async function restoreEntry(entry: TimelineEntry) {
+    try {
+      const hidden = targetsFor(entry).filter((target) => target.item.hidden);
+      (await restoreMessages(groupsOf(hidden))).forEach((restored) => applyRestoredRef.current(restored));
+      selection.exit();
+    } catch (error) {
+      publishUiLog("error", `restore failed: ${String(error)}`);
+    }
+  }
+
+
   // Counted from the live items the main window shares, so both windows show
   // the same number; focusing this window marks it read in both.
   const unreadToMe = useToMeUnread(receivedItems, source, promiscuousBaseCallsign);
@@ -391,6 +491,7 @@ function ReceivedWindow() {
           />
           Show ACKs
         </label>
+        <SelectionHeader selection={selection} onClearAll={askClearAll} />
         <button type="button" className="received-window-close" onClick={closeWindow}>
           Close Window
         </button>
@@ -437,38 +538,63 @@ function ReceivedWindow() {
                 : "No messages for this filter."}
           </p>
         ) : (
-          timeline.map(({ direction, item }) => direction === "sent" ? (
-            <div key={`sent-${item.uuid ?? item.id}`} className={`msg-item sent-item status-${item.status} received-window-msg-item`}>
-              <div className="msg-item-top-row">
-                <span className="msg-time">{formatReceivedTime(item.timestamp)}</span>
-                <span className="msg-addr">▶ {item.destination}</span>
-                {item.hidden ? (
-                  <span className="msg-hidden-badge" title="Cleared from the list; kept in the database">hidden</span>
-                ) : null}
-                <span className={`msg-badge ${item.status}`}>{item.status}</span>
+          timeline.map((entry) => {
+            const { direction, item } = entry;
+            const key = entryKey(entry);
+            const actions = item.uuid ? (
+              <MessageRowActions
+                hidden={item.hidden}
+                onClear={() => askClearEntry(entry)}
+                onRestore={() => void restoreEntry(entry)}
+              />
+            ) : null;
+            return direction === "sent" ? (
+              <div key={`sent-${item.uuid ?? item.id}`} className={rowClass(selection, item.hidden)}>
+                <SelectBox selection={selection} uuid={item.uuid ? key : undefined} />
+                <div
+                  className={`msg-item sent-item status-${item.status} received-window-msg-item`}
+                  {...(item.uuid ? selection.pressHandlers(key) : {})}
+                  onClick={() => {
+                    if (item.uuid) selection.handleClick(key);
+                  }}
+                >
+                  <div className="msg-item-top-row">
+                    <span className="msg-time">{formatReceivedTime(item.timestamp)}</span>
+                    <span className="msg-addr">▶ {item.destination}</span>
+                    <span className={`msg-badge ${item.status}`}>{item.status}</span>
+                  </div>
+                  <div className="msg-body">{item.body}</div>
+                </div>
+                {actions}
               </div>
-              <div className="msg-body">{item.body}</div>
-            </div>
-          ) : (
-            <button
-              key={`received-${item.uuid ?? item.id}`}
-              type="button"
-              className="msg-item recv-item recv-clickable received-window-msg-item"
-              onClick={() => openReplyDialog(item)}
-              title={`Reply to ${item.from}`}
-            >
-              <div className="msg-item-top-row">
-                <span className="msg-time">{formatReceivedTime(item.timestamp)}</span>
-                <span className="msg-addr">◀ {item.from}</span>
-                {item.to ? <span className="msg-addr">▶ {item.to}</span> : null}
-                {item.aprsType && item.aprsType !== "other" ? (
-                  <span className="msg-type-badge">{item.aprsType}</span>
-                ) : null}
-                {item.micEDecoded ? <span className="mic-e-inline-badge">Mic-E</span> : null}
+            ) : (
+              <div key={`received-${item.uuid ?? item.id}`} className={rowClass(selection, item.hidden)}>
+                <SelectBox selection={selection} uuid={item.uuid ? key : undefined} />
+                <button
+                  type="button"
+                  className="msg-item recv-item recv-clickable received-window-msg-item"
+                  {...(item.uuid ? selection.pressHandlers(key) : {})}
+                  onClick={() => {
+                    if (item.uuid && selection.handleClick(key)) return;
+                    openReplyDialog(item);
+                  }}
+                  title={selection.active ? undefined : `Reply to ${item.from}`}
+                >
+                  <div className="msg-item-top-row">
+                    <span className="msg-time">{formatReceivedTime(item.timestamp)}</span>
+                    <span className="msg-addr">◀ {item.from}</span>
+                    {item.to ? <span className="msg-addr">▶ {item.to}</span> : null}
+                    {item.aprsType && item.aprsType !== "other" ? (
+                      <span className="msg-type-badge">{item.aprsType}</span>
+                    ) : null}
+                    {item.micEDecoded ? <span className="mic-e-inline-badge">Mic-E</span> : null}
+                  </div>
+                  <div className="msg-body">{item.body}</div>
+                </button>
+                {actions}
               </div>
-              <div className="msg-body">{item.body}</div>
-            </button>
-          ))
+            );
+          })
         )}
         {canLoadMore ? (
           <button type="button" className="secondary received-window-load-older" onClick={loadOlder}>
@@ -476,6 +602,8 @@ function ReceivedWindow() {
           </button>
         ) : null}
       </div>
+
+      <ClearDialog request={clearRequest} onClose={() => setClearRequest(null)} />
 
       {replyOpen ? (
         <div className="reply-overlay" role="dialog" aria-modal="true" aria-label="Reply to message">

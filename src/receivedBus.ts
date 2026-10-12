@@ -4,6 +4,8 @@ export type ReceivedItem = {
   // the store could not record the packet.
   uuid?: string;
   seq?: number;
+  // Set on search results cleared from the list but kept in the database.
+  hidden?: boolean;
   timestamp: number;
   from: string;
   to?: string;
@@ -40,6 +42,18 @@ export type SentItem = {
   hidden?: boolean;
 };
 
+/** Messages cleared from a list: hidden, or deleted from the database. */
+export type MessagesCleared = {
+  list: "sent" | "received";
+  uuids: string[];
+  deleted: boolean;
+};
+
+/** Hidden messages put back in their list. */
+export type MessagesRestored =
+  | { list: "sent"; items: SentItem[] }
+  | { list: "received"; items: ReceivedItem[] };
+
 type ReceivedSyncEvent =
   | {
       type: "snapshot";
@@ -49,6 +63,8 @@ type ReceivedSyncEvent =
       type: "sent-snapshot";
       items: SentItem[];
     }
+  | ({ type: "messages-cleared" } & MessagesCleared)
+  | { type: "messages-restored"; restored: MessagesRestored }
   | {
       type: "window-state";
       open: boolean;
@@ -125,6 +141,33 @@ export function subscribeSentSnapshots(listener: (items: SentItem[]) => void): (
   return subscribe((payload) => {
     if (payload.type === "sent-snapshot") {
       listener(payload.items);
+    }
+  });
+}
+
+// Every window drops cleared messages from what it shows. The channel never
+// delivers to the sender, so the window that cleared applies it itself too.
+export function publishMessagesCleared(cleared: MessagesCleared): void {
+  postEvent({ type: "messages-cleared", ...cleared });
+}
+
+export function subscribeMessagesCleared(listener: (cleared: MessagesCleared) => void): () => void {
+  return subscribe((payload) => {
+    if (payload.type === "messages-cleared") {
+      const { list, uuids, deleted } = payload;
+      listener({ list, uuids, deleted });
+    }
+  });
+}
+
+export function publishMessagesRestored(restored: MessagesRestored): void {
+  postEvent({ type: "messages-restored", restored });
+}
+
+export function subscribeMessagesRestored(listener: (restored: MessagesRestored) => void): () => void {
+  return subscribe((payload) => {
+    if (payload.type === "messages-restored") {
+      listener(payload.restored);
     }
   });
 }

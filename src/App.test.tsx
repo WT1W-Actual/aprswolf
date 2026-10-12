@@ -902,11 +902,159 @@ describe("App", () => {
 
     fireEvent.change(field, { target: { value: "net" } });
 
-    const sentRow = (await screen.findByText("See you on the net")).closest(".msg-item") as HTMLElement;
+    const sentRow = (await screen.findByText("See you on the net")).closest(".msg-row") as HTMLElement;
     expect(within(sentRow).getByText("hidden")).toBeInTheDocument();
     expect(await screen.findByText("Are you on the net")).toBeInTheDocument();
     expect(invokeMock).toHaveBeenCalledWith("search_sent_messages", { query: "net" });
     expect(invokeMock).toHaveBeenCalledWith("search_received_messages", { query: "net" });
+  });
+
+  it("hides one sent message with the row's x, keeping it findable by search", async () => {
+    invokeMock.mockImplementation((cmd: string, payload?: any) => {
+      if (cmd === "load_settings") return Promise.resolve(DEFAULT_SETTINGS);
+      if (cmd === "load_received_messages") return Promise.resolve([]);
+      if (cmd === "load_sent_messages") {
+        return Promise.resolve([
+          { uuid: "s-1", seq: 2, timestamp: Date.now(), destination: "N6TEST-7", body: "Clear me", status: "acked" },
+          { uuid: "s-2", seq: 1, timestamp: Date.now() - 1_000, destination: "K6TEST-9", body: "Keep me", status: "acked" },
+        ]);
+      }
+      if (cmd === "get_web_server_status") return Promise.resolve({ enabled: false, port: 18420, url: null });
+      if (cmd === "get_manual_beacon_cooldown_remaining") return Promise.resolve(0);
+      if (cmd === "clear_messages") return Promise.resolve(payload?.uuids?.length ?? 0);
+      if (cmd === "search_received_messages") return Promise.resolve([]);
+      if (cmd === "search_sent_messages") {
+        return Promise.resolve([
+          { uuid: "s-1", seq: 2, timestamp: Date.now(), destination: "N6TEST-7", body: "Clear me", status: "acked", hidden: true },
+        ]);
+      }
+      return Promise.resolve(undefined);
+    });
+    render(<App />);
+
+    const row = (await screen.findByText("Clear me")).closest(".msg-row") as HTMLElement;
+    fireEvent.click(within(row).getByRole("button", { name: "Clear this message" }));
+
+    const dialog = await screen.findByRole("dialog", { name: "Clear messages" });
+    expect(within(dialog).getByRole("heading")).toHaveTextContent("Clear this message?");
+    expect(within(dialog).getByLabelText("Delete from database")).not.toBeChecked();
+    fireEvent.click(within(dialog).getByRole("button", { name: "Clear" }));
+
+    await waitFor(() => expect(screen.queryByText("Clear me")).not.toBeInTheDocument());
+    expect(invokeMock).toHaveBeenCalledWith("clear_messages", { list: "sent", uuids: ["s-1"], delete: false });
+    expect(screen.getByText("Keep me")).toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText("Search message history"), { target: { value: "clear" } });
+    const hit = (await screen.findByText("Clear me")).closest(".msg-row") as HTMLElement;
+    expect(within(hit).getByText("hidden")).toBeInTheDocument();
+  });
+
+  it("deletes only the received messages shown with Clear all and the database box checked", async () => {
+    invokeMock.mockImplementation((cmd: string) => {
+      if (cmd === "load_settings") return Promise.resolve(DEFAULT_SETTINGS);
+      if (cmd === "load_sent_messages") return Promise.resolve([]);
+      if (cmd === "load_received_messages") {
+        return Promise.resolve([
+          { uuid: "r-1", seq: 2, timestamp: Date.now(), from: "N6TEST-7", to: "WT1W-15", body: "First to go", aprsType: "msg" },
+          { uuid: "r-2", seq: 1, timestamp: Date.now() - 1_000, from: "K6TEST-9", to: "WT1W-15", body: "Second to go", aprsType: "msg" },
+        ]);
+      }
+      if (cmd === "clear_messages") return Promise.resolve(2);
+      if (cmd === "get_web_server_status") return Promise.resolve({ enabled: false, port: 18420, url: null });
+      if (cmd === "get_manual_beacon_cooldown_remaining") return Promise.resolve(0);
+      return Promise.resolve(undefined);
+    });
+    render(<App />);
+
+    await screen.findByText("First to go");
+    const header = screen.getByRole("heading", { name: "Received Messages" }).parentElement as HTMLElement;
+    fireEvent.click(within(header).getByRole("button", { name: "Clear all" }));
+
+    const dialog = await screen.findByRole("dialog", { name: "Clear messages" });
+    expect(within(dialog).getByRole("heading")).toHaveTextContent("Clear the 2 received messages shown?");
+    fireEvent.click(within(dialog).getByLabelText("Delete from database"));
+    fireEvent.click(within(dialog).getByRole("button", { name: "Delete" }));
+
+    await waitFor(() => expect(screen.queryByText("First to go")).not.toBeInTheDocument());
+    expect(screen.queryByText("Second to go")).not.toBeInTheDocument();
+    expect(invokeMock).toHaveBeenCalledWith("clear_messages", { list: "received", uuids: ["r-1", "r-2"], delete: true });
+  });
+
+  it("selects messages with a long press and clears the selection from one x", async () => {
+    invokeMock.mockImplementation((cmd: string) => {
+      if (cmd === "load_settings") return Promise.resolve(DEFAULT_SETTINGS);
+      if (cmd === "load_received_messages") return Promise.resolve([]);
+      if (cmd === "load_sent_messages") {
+        return Promise.resolve([
+          { uuid: "s-1", seq: 3, timestamp: Date.now(), destination: "N6TEST-7", body: "Pick one", status: "acked" },
+          { uuid: "s-2", seq: 2, timestamp: Date.now() - 1_000, destination: "N6TEST-7", body: "Skip me", status: "acked" },
+          { uuid: "s-3", seq: 1, timestamp: Date.now() - 2_000, destination: "K6TEST-9", body: "Pick two", status: "acked" },
+        ]);
+      }
+      if (cmd === "get_web_server_status") return Promise.resolve({ enabled: false, port: 18420, url: null });
+      if (cmd === "get_manual_beacon_cooldown_remaining") return Promise.resolve(0);
+      if (cmd === "clear_messages") return Promise.resolve(2);
+      return Promise.resolve(undefined);
+    });
+    render(<App />);
+
+    const first = (await screen.findByText("Pick one")).closest(".msg-item") as HTMLElement;
+    fireEvent.pointerDown(first, { button: 0 });
+    await new Promise((resolve) => setTimeout(resolve, 600));
+    fireEvent.pointerUp(first);
+    fireEvent.click(first);
+
+    const boxes = await screen.findAllByRole("checkbox", { name: "Select message" });
+    expect(boxes).toHaveLength(3);
+    expect(boxes[0]).toBeChecked();
+    expect(screen.getByText("1 selected")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByText("Pick two").closest(".msg-item") as HTMLElement);
+    expect(screen.getByText("2 selected")).toBeInTheDocument();
+
+    const row = screen.getByText("Pick two").closest(".msg-row") as HTMLElement;
+    fireEvent.click(within(row).getByRole("button", { name: "Clear this message" }));
+    const dialog = await screen.findByRole("dialog", { name: "Clear messages" });
+    expect(within(dialog).getByRole("heading")).toHaveTextContent("Clear these 2 sent messages?");
+    fireEvent.click(within(dialog).getByRole("button", { name: "Clear" }));
+
+    await waitFor(() => expect(screen.queryByText("Pick one")).not.toBeInTheDocument());
+    expect(screen.queryByText("Pick two")).not.toBeInTheDocument();
+    expect(screen.getByText("Skip me")).toBeInTheDocument();
+    expect(invokeMock).toHaveBeenCalledWith("clear_messages", { list: "sent", uuids: ["s-1", "s-3"], delete: false });
+    expect(screen.queryByRole("checkbox", { name: "Select message" })).not.toBeInTheDocument();
+  });
+
+  it("unhides a hidden search result and puts it back in its list", async () => {
+    const now = Date.now();
+    invokeMock.mockImplementation((cmd: string, payload?: any) => {
+      if (cmd === "load_settings") return Promise.resolve(DEFAULT_SETTINGS);
+      if (cmd === "load_received_messages") return Promise.resolve([]);
+      if (cmd === "load_sent_messages") {
+        return Promise.resolve([{ uuid: "s-2", seq: 1, timestamp: now - 5_000, destination: "N6TEST-7", body: "Still listed", status: "acked" }]);
+      }
+      if (cmd === "get_web_server_status") return Promise.resolve({ enabled: false, port: 18420, url: null });
+      if (cmd === "get_manual_beacon_cooldown_remaining") return Promise.resolve(0);
+      if (cmd === "search_received_messages") return Promise.resolve([]);
+      if (cmd === "search_sent_messages" && payload?.query === "back") {
+        return Promise.resolve([{ uuid: "s-1", seq: 2, timestamp: now, destination: "N6TEST-7", body: "Bring me back", status: "acked", hidden: true }]);
+      }
+      if (cmd === "restore_messages") return Promise.resolve(1);
+      return Promise.resolve(undefined);
+    });
+    render(<App />);
+
+    const field = await screen.findByLabelText("Search message history");
+    fireEvent.change(field, { target: { value: "back" } });
+    const hit = (await screen.findByText("Bring me back")).closest(".msg-row") as HTMLElement;
+    fireEvent.click(within(hit).getByRole("button", { name: "Unhide this message" }));
+
+    await waitFor(() => expect(within(hit).queryByText("hidden")).not.toBeInTheDocument());
+    expect(invokeMock).toHaveBeenCalledWith("restore_messages", { list: "sent", uuids: ["s-1"] });
+
+    fireEvent.change(field, { target: { value: "" } });
+    expect(await screen.findByText("Bring me back")).toBeInTheDocument();
+    expect(screen.getByText("Still listed")).toBeInTheDocument();
   });
 
   it("lists sent messages from earlier sessions and keeps their status current", async () => {

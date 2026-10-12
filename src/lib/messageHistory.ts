@@ -2,13 +2,20 @@ import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { publishUiLog } from "../logBus";
 import { nextId } from "./helpers";
-import { type ReceivedItem, type SentItem } from "../receivedBus";
+import {
+  publishMessagesCleared,
+  publishMessagesRestored,
+  type MessagesCleared,
+  type MessagesRestored,
+  type ReceivedItem,
+  type SentItem,
+} from "../receivedBus";
 
 // Rows per page from the message history; matches the backend's PAGE_SIZE.
 export const PAGE_SIZE = 200;
 
 /** Any message row from the history: received or sent. */
-type HistoryItem = { id: number; uuid?: string; seq?: number };
+type HistoryItem = { id: number; uuid?: string; seq?: number; hidden?: boolean };
 
 /** Keep the first copy of each stored message, in order. */
 export function dedupeByUuid<T extends HistoryItem>(items: T[]): T[] {
@@ -48,6 +55,8 @@ export type MessageSearch<T extends HistoryItem = ReceivedItem> = {
   results: T[] | null;
   hasMore: boolean;
   loadMore: () => Promise<void>;
+  /** Change the current results in place, as when messages are cleared. */
+  update: (change: (items: T[]) => T[]) => void;
 };
 
 /**
@@ -103,7 +112,11 @@ export function useMessageSearch<T extends HistoryItem = ReceivedItem>(
     }
   }
 
-  return { results, hasMore, loadMore };
+  function update(change: (items: T[]) => T[]) {
+    setResults((prev) => (prev ? change(prev) : prev));
+  }
+
+  return { results, hasMore, loadMore, update };
 }
 
 export type TimelineEntry =
@@ -133,4 +146,76 @@ export function mergeTimeline(
   return entries
     .filter((entry) => entry.item.timestamp >= cutoff)
     .sort((a, b) => b.item.timestamp - a.item.timestamp);
+}
+
+function isCleared(item: HistoryItem, cleared: MessagesCleared): boolean {
+  return Boolean(item.uuid && cleared.uuids.includes(item.uuid));
+}
+
+/** A list without the cleared messages. */
+export function dropCleared<T extends HistoryItem>(items: T[], cleared: MessagesCleared): T[] {
+  return items.filter((item) => !isCleared(item, cleared));
+}
+
+/**
+ * Search results after a clear: deleted messages go, hidden ones stay and
+ * are marked hidden, since search still finds them.
+ */
+export function markCleared<T extends HistoryItem>(items: T[], cleared: MessagesCleared): T[] {
+  if (cleared.deleted) return dropCleared(items, cleared);
+  return items.map((item) => (isCleared(item, cleared) ? { ...item, hidden: true } : item));
+}
+
+/**
+ * A list with restored messages back in place, newest first. One older than
+ * everything loaded belongs to a page not loaded yet, so it waits there.
+ */
+export function insertRestored<T extends HistoryItem & { timestamp: number }>(items: T[], restored: T[]): T[] {
+  const present = new Set(items.map((item) => item.uuid).filter(Boolean));
+  const oldest = items.reduce((min, item) => Math.min(min, item.timestamp), Infinity);
+  const back = restored
+    .filter((item) => !item.uuid || !present.has(item.uuid))
+    .filter((item) => items.length === 0 || item.timestamp >= oldest)
+    .map((item) => ({ ...item, hidden: false, id: nextId() }));
+  if (back.length === 0) return items;
+  return [...items, ...back].sort((a, b) => b.timestamp - a.timestamp);
+}
+
+/** Search results with restored messages no longer marked hidden. */
+export function markRestored<T extends HistoryItem>(items: T[], uuids: string[]): T[] {
+  return items.map((item) => (item.uuid && uuids.includes(item.uuid) ? { ...item, hidden: false } : item));
+}
+
+/** Messages to clear or restore, grouped by the list they belong to. */
+export type MessageGroups = { sent: SentItem[]; received: ReceivedItem[] };
+
+const uuidsOf = (items: HistoryItem[]) => items.map((item) => item.uuid).filter((uuid): uuid is string => Boolean(uuid));
+
+/** Clear messages in the store, then tell every window. Returns what changed. */
+export async function clearMessages(groups: MessageGroups, deleted: boolean): Promise<MessagesCleared[]> {
+  const done: MessagesCleared[] = [];
+  for (const list of ["sent", "received"] as const) {
+    const uuids = uuidsOf(groups[list]);
+    if (uuids.length === 0) continue;
+    await invoke("clear_messages", { list, uuids, delete: deleted });
+    const cleared = { list, uuids, deleted };
+    publishMessagesCleared(cleared);
+    done.push(cleared);
+  }
+  return done;
+}
+
+/** Unhide messages in the store, then tell every window. */
+export async function restoreMessages(groups: MessageGroups): Promise<MessagesRestored[]> {
+  const done: MessagesRestored[] = [];
+  if (groups.sent.length > 0) {
+    await invoke("restore_messages", { list: "sent", uuids: uuidsOf(groups.sent) });
+    done.push({ list: "sent", items: groups.sent });
+  }
+  if (groups.received.length > 0) {
+    await invoke("restore_messages", { list: "received", uuids: uuidsOf(groups.received) });
+    done.push({ list: "received", items: groups.received });
+  }
+  done.forEach(publishMessagesRestored);
+  return done;
 }
