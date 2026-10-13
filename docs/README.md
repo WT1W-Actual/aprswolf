@@ -21,6 +21,7 @@ Use the end-user guide for:
 - connecting with TNC or APRS-IS
 - sending and receiving messages
 - searching, clearing, exporting, and importing message history
+- the unread count and the Messages window
 - theme and sound settings
 - remote web control
 - troubleshooting
