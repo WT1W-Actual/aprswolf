@@ -354,10 +354,13 @@ The remote control page gives you browser-based access to the same saved station
 
 What you can do from this page:
 
-- connect or disconnect TNC mode
-- connect or disconnect APRS-IS mode
-- send messages and beacons
-- review queue and received message sections
+- send messages from the send row at the top, laid out like the desktop main window
+- read sent and received messages side by side, filtered with All, To Me, Messages, and Bulletins (acks stay hidden unless Show ACKs is on), and tap a received message to reply to its sender
+- connect or disconnect TNC or APRS-IS mode, send a beacon, and clear the queue from the bottom bar, where each has its status dot
+- change station and connection settings under Settings, and follow events under Activity
+- turn remote control off with Disable Remote
+
+On a phone the Sent and Received panes stack.
 
 ## Where To Look For Help
 
