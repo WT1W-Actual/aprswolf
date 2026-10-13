@@ -149,7 +149,8 @@ function LogWindow() {
           (summary_source ?? protocol_source ?? source) && (summary_destination ?? protocol_destination ?? destination)
             ? `${summary_source ?? protocol_source ?? source} > ${summary_destination ?? protocol_destination ?? destination}${pathStr}: ${body}`
             : text;
-        pushLog("rx", `RX ${bytes}B ${summary} [${payload_hex}]`);
+        const dup = event.payload.duplicate ? " (duplicate)" : "";
+        pushLog("rx", `RX ${bytes}B ${summary}${dup} [${payload_hex}]`);
       });
       if (!track(unlistenMessage)) return () => {};
 

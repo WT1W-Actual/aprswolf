@@ -29,7 +29,7 @@ export const HELP_SECTIONS: HelpSection[] = [
           "Live APRS-IS controls using the saved server, port, passcode, and receive filter.",
           "Message composer for direct APRS messages.",
           "Sent and Received panes for day-to-day traffic review.",
-          "Traffic Log, Received Pop-Out, Preferences, and Help as separate windows for focused tasks.",
+          "Traffic Log, the Messages pop-out, Preferences, and Help as separate windows for focused tasks.",
         ],
       },
     ],
@@ -67,7 +67,7 @@ export const HELP_SECTIONS: HelpSection[] = [
     blocks: [
       {
         type: "paragraph",
-        text: "Open Preferences from the APRSWolf menu or from the Open Preferences button in the main window. This is where a new user should enter the static setup the app reuses later.",
+        text: "Open Preferences from the APRSWolf menu or with the gear at the top right of the main window; Escape closes it. This is where a new user should enter the static setup the app reuses later.",
       },
       {
         type: "list",
@@ -218,18 +218,27 @@ export const HELP_SECTIONS: HelpSection[] = [
   {
     id: "receiving",
     title: "Receiving Traffic",
-    summary: "Use filters, the pop-out view, and the traffic log to manage inbound APRS traffic.",
+    summary: "Use filters, search, the Messages window, and the traffic log to manage APRS traffic.",
     blocks: [
       {
         type: "list",
         items: [
           "Use filter chips to narrow traffic by category such as Messages, Queries, Weather, Telemetry, or To Me.",
           "Messages shows all APRS message frames. To Me only shows traffic addressed to your station.",
+          "A red count on To Me, and on the app icon, shows messages addressed to you that arrived while APRSWolf was in the background. You can turn the app icon count off in Preferences.",
           "Promiscuous Base-Call is a main-window toggle that also treats messages for your base callsign as yours.",
-          "The Received Pop-Out window shares the same message list and reply behavior as the main window.",
+          "The search field in the Sent Messages header searches sent and received messages across the whole history and filters both panes.",
+          "Pop Out opens the Messages window: sent and received in one timeline, with its own search and reply behavior.",
+          "A packet heard twice, over RF and APRS-IS or through two digipeaters, is listed once.",
           "Multipart stitching is applied for near-sequential fragments from the same station.",
           "Mic-E packets display with a badge and decoded body when available.",
         ],
+      },
+      {
+        type: "callout",
+        tone: "info",
+        title: "Clearing messages",
+        text: "Hover a message and click × to clear it, or use Clear all beside a pane title to clear what that pane shows. Hold a message for half a second to select several, then click × on any selected one. Leave Delete from database unchecked to hide the messages but keep them findable by search, where ↺ puts one back; check it to delete them.",
       },
       {
         type: "callout",

@@ -15,8 +15,10 @@ queues it, and keeps retrying with backoff until the other station acks
 or the message expires, so you can watch delivery instead of guessing.
 Incoming traffic sorts itself into filters for direct messages,
 bulletins, weather, Mic-E, telemetry and more, and a click on any
-message starts a reply. Position beacons go out on connect and on a
-timer.
+message starts a reply. Everything you send and receive is kept in a
+local history you can search, and the app icon shows a count of unread
+messages addressed to you. Send a position beacon with one click, or
+turn on beaconing at connect and on a timer in Preferences.
 
 Leave the radio in the shack and run it from the couch: the built-in
 remote control serves a browser page you can open from your phone on
@@ -44,7 +46,7 @@ No build tools needed.
 
 **Which ARM build do I need?** The `aarch64` DMG is for **Apple Silicon Macs**
 (M1 and later). The `arm64` Linux packages are for **ARM64 Linux**, such as a
-64-bit Raspberry Pi. They are not interchangeable — pick the one that matches
+64-bit Raspberry Pi. They are not interchangeable - pick the one that matches
 your operating system, not just the CPU family.
 
 The macOS and Windows builds aren't code-signed yet, so the first launch
@@ -62,14 +64,21 @@ needs one extra click:
 
 ### Getting started
 
-You'll need an amateur radio callsign. Then pick one way onto the
-network:
+You'll need an amateur radio callsign. Open Preferences with the gear
+(⚙︎) at the top right of the main window, enter your callsign, and save.
+Then pick one way onto the network from the bar along the bottom of the
+main window:
 
-- **No radio needed:** choose APRS-IS, enter your callsign, and connect.
-  APRSWolf fills in the passcode from your callsign.
+- **No radio needed:** click **Connect APRS-IS**. APRSWolf derives the
+  passcode from your callsign.
 - **On the air:** run [Dire Wolf](https://github.com/wb2osz/direwolf) or
-  Graywolf with your radio, then point APRSWolf at its host and KISS port
-  (8001 by default).
+  Graywolf with your radio, enter its host and KISS port (8001 by
+  default) under TNC in Preferences, then click **Connect TNC**.
+  APRSWolf sends over the KISS port and receives over the AGW port, one
+  below it (8000 by default).
+
+A green dot beside Station, TNC, APRS-IS and Remote in that bottom bar
+means it's on; red means off.
 
 The [End User Guide](docs/END-USER-GUIDE.md) walks through the rest.
 
@@ -77,20 +86,22 @@ The [End User Guide](docs/END-USER-GUIDE.md) walks through the rest.
 
 - No replies from bots:
   Verify "Message To" is the bot callsign and path is valid for your RF area.
-- App layout jumps or grows:
-  Traffic Log should stay off by default; if enabled, it scrolls internally.
-- Connection succeeds but no decode events:
-  Verify the RX socket endpoint and that Dire Wolf is configured to allow AGW TCP connections.
 - Can't connect to Dire Wolf:
   Ensure Dire Wolf is running on the target host and that your network allows TCP traffic to
   the configured AGW/KISS port. On the Dire Wolf host, check `AGWPORT` and `KISSPORT` settings
   in `direwolf.conf`.
+- Connected to Dire Wolf but nothing is received:
+  APRSWolf receives on Dire Wolf's AGW port, one below the KISS port (8000 when KISS is 8001).
+  Check that `AGWPORT` is set in `direwolf.conf`.
+- No unread count on the app icon on Linux:
+  KDE Plasma and the Ubuntu dock show it; stock GNOME doesn't display app badges.
+  On Windows the taskbar icon shows a red dot instead of a number.
 
 ## Documentation
 
 - Documentation index: see [docs/README.md](docs/README.md)
 - End users: see [docs/END-USER-GUIDE.md](docs/END-USER-GUIDE.md)
-- Developers: see [docs/DEVELOPER-GUIDE.md](docs/DEVELOPER-GUIDE.md) (architecture, code patterns, audit history)
+- Developers: see [docs/DEVELOPER-GUIDE.md](docs/DEVELOPER-GUIDE.md) (architecture, code patterns, audit history); build and test steps are below
 - In-app help reference: see [docs/IN-APP-HELP.md](docs/IN-APP-HELP.md)
 - Release notes template: see [docs/RELEASE-NOTES-TEMPLATE.md](docs/RELEASE-NOTES-TEMPLATE.md)
 - Release index: see [docs/releases/README.md](docs/releases/README.md)
@@ -99,19 +110,61 @@ The [End User Guide](docs/END-USER-GUIDE.md) walks through the rest.
 
 ## What It Does
 
-- Connects to a Dire Wolf TNC via KISS TCP with separate TX/RX status indicators.
-- Connects to APRS-IS for internet-based APRS messaging (mutually exclusive with TNC).
-- Sends APRS message frames with ACK numbering.
-- Persists outbound messages to a durable queue.
-- Retries queued and failed messages with backoff until acked, failed, or expired.
-- Shows compact Sent and Received panes that resize dynamically with the window.
-- Supports click-to-reply from Received messages.
-- Includes a dedicated Help window with guided setup and troubleshooting topics.
-- Exposes native macOS `Preferences...` and `Help > APRSWolf Help` menu items.
-- Opens the enabled Remote Web Control page in the system browser from the desktop app.
-- Supports a Received filter (To Me Only).
-- Supports optional Traffic Log panel (off by default).
-- Auto-derives APRS-IS passcode from the source callsign.
+- Connects to Dire Wolf or Graywolf over TCP (KISS to send, AGW to receive), or to APRS-IS over the internet. One transport is active at a time.
+- Sends APRS messages with message numbers, then retries with backoff until the other station acks, the message fails, or it expires.
+- Shows Sent and Received side by side, with each sent message's delivery status (queued, sent, acked, failed, expired) kept current.
+- Filters received traffic by type: To Me, Bulletins, Queries, Messages, Weather, Position, Status, Objects, Items, Mic-E, Telemetry, Other.
+- Starts a reply when you click a received message.
+- Keeps sent and received messages in a local database across restarts, and searches all of it from one search field.
+- Stores a packet heard twice (over RF and APRS-IS, or through two digipeaters) only once.
+- Lets you hide or delete messages one at a time, as a selection, or everything a list shows.
+- Shows an unread count for messages addressed to you on the To Me filter, and on the app icon while APRSWolf is in the background.
+- Shows UTC and local time in the header.
+- Opens a separate Messages window with sent and received in one timeline, and a Traffic Log window with every raw packet and event.
+- Derives the APRS-IS passcode from your callsign.
+- Serves a browser remote control page for your phone or another computer.
+- Includes a Help window with setup and troubleshooting topics, and native `Preferences...` and `Help > APRSWolf Help` menu items.
+
+## Using the Main Window
+
+From top to bottom:
+
+- **Header:** version, connection status, UTC and local time (`15:08Z 08:08 PDT`), **Traffic Log ↗**, and the gear (⚙︎) for Preferences. Escape closes Preferences.
+- **Send row:** **Message To** is the station you're messaging, and **Message** is the text, up to 67 characters. Click **Send**.
+- **Sent Messages:** what you've sent, newest first, each with its delivery status, plus **Clear all** and the search field.
+- **Received Messages:** incoming traffic with the filter chips and **Clear all**. Click a message to reply. A red count on **To Me** shows messages addressed to you that arrived while APRSWolf was in the background; it clears when you come back. **Pop Out ↗** moves the list to the separate Messages window, which shows sent and received together.
+- **Bottom bar:** Station (with **Beacon**), TNC, APRS-IS, and Remote Web Control, each with its on/off dot and address. Hover a title for what it does. TNC and APRS-IS can't both be connected.
+
+Sent messages have a purple background and received ones green, in both windows. A message split into parts by the sender is joined back into one when the parts arrive close together.
+
+## Message History
+
+Sent and received messages are stored in a SQLite database, `messages.db`, in the app data folder:
+
+- macOS: `~/Library/Application Support/com.jperry.aprswolf/`
+- Linux: `~/.local/share/com.jperry.aprswolf/`
+- Windows: `%APPDATA%\com.jperry.aprswolf\`
+
+What is kept:
+
+- Sent messages, and received messages, queries, and bulletins, are kept until you delete them.
+- Positions, weather, telemetry, status, objects, items, Mic-E, and acks are removed after 7 days by default. Change this under Preferences > Message History (1 day, 7 days, 30 days, or keep everything). The trim runs at most once an hour while packets arrive.
+- A sent message still waiting for its ack when the app closes is marked expired at the next launch, since nothing will retry it.
+- A packet heard again within 30 seconds (over RF and APRS-IS, or through a second digipeater) is stored once. The Traffic Log still shows every copy, tagged `(duplicate)`.
+
+Each list loads the newest 200 messages. In the separate Messages window (**Pop Out ↗**), **Load older messages** at the bottom fetches the next 200.
+
+To search, use the field in the Sent Messages header. It matches callsigns and message text across the whole history and filters both panes as you type. The Messages window has its own search field.
+
+On first launch after upgrading, the old `received_messages.json` is imported once and renamed to `received_messages.json.migrated`.
+
+### Clearing messages
+
+- Hover a message and click **×** to clear it.
+- **Clear all**, beside each pane's title, clears the messages that pane shows: up to the newest 200, after any filter chips. Older history isn't touched.
+- To clear several at once, hold a message for half a second. A checkbox appears on every message; check the ones you want, then click **×** on any checked message. **Done** or Escape leaves selection.
+
+Each opens a dialog with a **Delete from database** box, unchecked by default. Left unchecked, the messages leave the list but stay in the database, and search still finds them marked **HIDDEN**. Click **↺** beside a hidden result to put it back in its list. Checked, they are deleted and no search finds them.
 
 ## APRS And AX.25 Behavior
 
@@ -128,20 +181,6 @@ In plain terms:
 - Message To field = station you want to message (example: WXYO).
 - Digipeater Path field = WIDE path list.
 
-## UI Notes
-
-- APRSWolf logo is centered at the top of the interface.
-- Station settings (callsign, digi path), TNC, and APRS-IS controls are combined in a
-  single compact row separated by vertical dividers.
-- TNC and APRS-IS are mutually exclusive - connecting one disables the other.
-- Input fields are fixed-width to avoid wasted space (callsigns, ports, hosts).
-- Sent and Received message panes resize dynamically to fill available window space.
-- Message and Traffic Log panels stretch both horizontally and vertically with the window.
-- Received text wraps instead of forcing horizontal growth.
-- Basic multipart stitching is applied for near-sequential fragments from the same sender.
-- Traffic Log can be shown/hidden via a centered toggle button.
-- Help opens in its own macOS-style window with sidebar navigation and search.
-
 ## Building from source
 
 Only needed if you want to build APRSWolf yourself; to just run it, use
@@ -153,7 +192,7 @@ installing or building anything.
 - **Node.js** (LTS)
 - **Rust**, installed through rustup
 - **Tauri's system libraries** for your OS, listed below
-- **Dire Wolf** (optional, for TNC mode). APRSWolf does not include a software TNC. You can use Dire Wolf as a KISS TCP TNC. Dire Wolf must be configured with a KISS TCP port (default 8001) that APRSWolf can connect to. See [Dire Wolf documentation](https://github.com/wb2osz/direwolf) for setup details.
+- **Dire Wolf** (optional, for TNC mode). APRSWolf does not include a software TNC. You can use Dire Wolf as a TCP TNC. Dire Wolf must be configured with a KISS TCP port (default 8001), which APRSWolf sends on, and an AGW port one below it (default 8000), which APRSWolf receives on. See [Dire Wolf documentation](https://github.com/wb2osz/direwolf) for setup details.
 - **APRS-IS Server** (optional, for APRS-IS mode). You can connect to any APRS-IS server (default `rotate.aprs2.net:14580`) for internet-based APRS messaging.
 - **Valid APRS Callsign**, required for both TNC and APRS-IS modes.
 - **APRS-IS Passcode**, derived automatically from your callsign for APRS-IS connections. Use `-1` for receive-only mode.

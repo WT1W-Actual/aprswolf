@@ -19,8 +19,10 @@ export type AppSettingsPayload = {
   web_server_token?: string;
   auto_beacon_on_connect?: boolean;
   auto_beacon_interval_secs?: number;
+  short_lived_retention_days?: number;
   show_ack_messages?: boolean;
   play_message_sound?: boolean;
+  show_app_badge?: boolean;
   promiscuous_base_callsign?: boolean;
   theme_mode?: ThemeMode;
   msg_font_size?: number;

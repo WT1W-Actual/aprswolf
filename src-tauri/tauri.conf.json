@@ -13,8 +13,8 @@
     "windows": [
       {
         "title": "APRSWolf",
-        "width": 960,
-        "height": 700,
+        "width": 1100,
+        "height": 740,
         "minWidth": 820,
         "minHeight": 580,
         "center": true

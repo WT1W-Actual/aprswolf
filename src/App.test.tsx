@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import App from "./App";
+import { formatHeaderClock } from "./HeaderClock";
 import HelpWindow from "./HelpWindow";
 import LogWindow from "./LogWindow";
 import PreferencesWindow from "./PreferencesWindow";
@@ -9,6 +10,8 @@ import { publishUiLog } from "./logBus";
 import packageJson from "../package.json";
 
 const invokeMock = vi.fn() as any;
+const destroyWindowMock = vi.fn();
+const setBadgeCountMock = vi.fn();
 const listenMock = vi.fn() as any;
 const getVersionMock = vi.fn() as any;
 const openUrlMock = vi.fn() as any;
@@ -52,7 +55,7 @@ vi.mock("@tauri-apps/plugin-opener", () => ({
 }));
 
 vi.mock("@tauri-apps/api/window", () => ({
-  getCurrentWindow: () => ({ destroy: vi.fn() }),
+  getCurrentWindow: () => ({ destroy: destroyWindowMock, setBadgeCount: setBadgeCountMock }),
 }));
 
 beforeEach(() => {
@@ -115,6 +118,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  (document.hasFocus as any).mockRestore?.();
   delete (globalThis as any).isTauri;
   window.localStorage.clear();
   vi.restoreAllMocks();
@@ -161,7 +165,10 @@ describe("App", () => {
   it("renders initial disconnected state and disabled send", async () => {
     render(<App />);
 
-    expect(await screen.findByText(/tnc & aprs-is are mutually exclusive/i)).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "TNC (Dire Wolf)" })).toHaveAttribute(
+      "title",
+      expect.stringMatching(/mutually exclusive/i),
+    );
     const expectedVersion = packageJson.version;
     expect(screen.getByLabelText(new RegExp(`application version v${expectedVersion}`, "i"))).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Send" })).toBeDisabled();
@@ -179,9 +186,10 @@ describe("App", () => {
   it("shows APRS-IS filter and path guidance", async () => {
     render(<App />);
 
-    expect(
-      screen.getByText(/direct aprs-is sends ignore the rf path field; wide paths are only used on tnc\/rf sends/i),
-    ).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "APRS-IS" })).toHaveAttribute(
+      "title",
+      expect.stringMatching(/direct aprs-is sends ignore the rf digi path; wide paths are only used on tnc\/rf sends/i),
+    );
   });
 
   it("recovers from a stale pop-out state key left by a crash", async () => {
@@ -208,6 +216,13 @@ describe("App", () => {
       await screen.findByText(/received messages are active in the popped-out window/i),
     ).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /bring pop-out forward/i })).toBeInTheDocument();
+  });
+
+  it("opens Preferences from the header gear button", async () => {
+    render(<App />);
+    fireEvent.click(await screen.findByRole("button", { name: "Open Preferences" }));
+
+    expect(invokeMock).toHaveBeenCalledWith("open_preferences", undefined);
   });
 
   it("invokes connect_tnc when Connect is clicked", async () => {
@@ -368,6 +383,41 @@ describe("App", () => {
       await screen.findByText("Mitylene AL. This Afternoon,Mostly Cloudy High 70"),
     ).toBeInTheDocument();
     expect(screen.queryByText(/\{ET$/)).not.toBeInTheDocument();
+  });
+
+  it("lists a packet heard twice once and marks the copy in the log", async () => {
+    render(<App />);
+
+    let messageHandler: ((event: unknown) => void) | undefined;
+    await waitFor(() => {
+      const messageCall = listenMock.mock.calls.find((call: any) => call[0] === "tnc_message");
+      expect(messageCall?.[1]).toBeTruthy();
+      messageHandler = messageCall?.[1] as (event: unknown) => void;
+    });
+
+    const packet = {
+      text: "N6TEST-7>APRS::WT1W-15  :Heard twice{12",
+      payload_hex: "AABB",
+      bytes: 40,
+      source: "N6TEST-7",
+      destination: "APRS",
+      path: [],
+      from: "N6TEST-7",
+      to: "WT1W-15",
+      body: "Heard twice",
+      aprsType: "msg",
+      isBulletin: false,
+      micEDecoded: false,
+      summary_source: "N6TEST-7",
+      summary_destination: "APRS",
+      uuid: "first-copy",
+      seq: 41,
+    };
+    messageHandler?.({ payload: packet });
+    messageHandler?.({ payload: { ...packet, path: ["TCPIP"], duplicate: true } });
+
+    expect(await screen.findByText(/RX 40B .*Heard twice \(duplicate\) \[AABB\]/)).toBeInTheDocument();
+    expect(screen.getAllByText("Heard twice")).toHaveLength(1);
   });
 
   it("classifies telemetry metadata messages as telemetry", async () => {
@@ -708,6 +758,333 @@ describe("App", () => {
     expect(await screen.findByText("Hello same base")).toBeInTheDocument();
   });
 
+  async function renderWithMessageHandler(settings: Record<string, unknown> = {}) {
+    invokeMock.mockImplementation((cmd: string) => {
+      if (cmd === "load_settings") return Promise.resolve({ ...DEFAULT_SETTINGS, ...settings });
+      if (cmd === "load_received_messages") return Promise.resolve([]);
+      if (cmd === "get_web_server_status") return Promise.resolve({ enabled: false, port: 18420, url: null });
+      if (cmd === "get_manual_beacon_cooldown_remaining") return Promise.resolve(0);
+      return Promise.resolve(undefined);
+    });
+    render(<App />);
+    let handler: ((event: unknown) => void) | undefined;
+    await waitFor(() => {
+      handler = listenMock.mock.calls.find((call: any) => call[0] === "tnc_message")?.[1];
+      expect(handler).toBeTruthy();
+    });
+    return (from: string, to: string | undefined, body: string, aprsType = "msg") =>
+      handler?.({
+        payload: {
+          text: `${from}>APZWLF::${to ?? ""}:${body}`,
+          payload_hex: "AABBCCDD",
+          bytes: 32,
+          source: from,
+          destination: "APZWLF",
+          path: [],
+          from,
+          to,
+          body,
+          aprsType,
+          isBulletin: false,
+          micEDecoded: false,
+          summary_source: from,
+          summary_destination: "APZWLF",
+        },
+      });
+  }
+
+  it("marks To Me messages unread on the chip and app icon while the app is in the background", async () => {
+    const hasFocus = vi.spyOn(document, "hasFocus").mockReturnValue(false);
+    localStorageStore["aprswolf-to-me-read-at"] = "1";
+    setBadgeCountMock.mockClear();
+    const emit = await renderWithMessageHandler();
+
+    emit("N0CALL-1", "WT1W-15", "Are you on the net tonight");
+    emit("N0CALL-1", "WT1W-15", "ack12");
+    emit("N0CALL-2", undefined, "!3830.00N/12130.00W>Mobile", "pos");
+
+    expect(await screen.findByTitle("1 unread")).toBeInTheDocument();
+    await waitFor(() => expect(setBadgeCountMock).toHaveBeenLastCalledWith(1));
+
+    // Bringing the app forward marks it read: chip dot and icon badge clear.
+    hasFocus.mockReturnValue(true);
+    fireEvent.focus(window);
+    await waitFor(() => expect(setBadgeCountMock).toHaveBeenLastCalledWith(undefined));
+    await waitFor(() => expect(screen.queryByTitle(/unread/)).not.toBeInTheDocument());
+  });
+
+  it("shows no unread dot or icon badge for messages that arrive while the app has focus", async () => {
+    vi.spyOn(document, "hasFocus").mockReturnValue(true);
+    localStorageStore["aprswolf-to-me-read-at"] = "1";
+    setBadgeCountMock.mockClear();
+    const emit = await renderWithMessageHandler();
+
+    emit("N0CALL-1", "WT1W-15", "Are you on the net tonight");
+
+    expect(await screen.findByText("Are you on the net tonight")).toBeInTheDocument();
+    await new Promise((resolve) => setTimeout(resolve, 250));
+    expect(screen.queryByTitle(/unread/)).not.toBeInTheDocument();
+    expect(setBadgeCountMock).not.toHaveBeenCalledWith(1);
+  });
+
+  it("keeps the app badge off when the setting is disabled", async () => {
+    vi.spyOn(document, "hasFocus").mockReturnValue(false);
+    localStorageStore["aprswolf-to-me-read-at"] = "1";
+    setBadgeCountMock.mockClear();
+    const emit = await renderWithMessageHandler({ show_app_badge: false });
+
+    emit("N0CALL-1", "WT1W-15", "Are you on the net tonight");
+
+    expect(await screen.findByTitle("1 unread")).toBeInTheDocument();
+    await new Promise((resolve) => setTimeout(resolve, 250));
+    expect(setBadgeCountMock).not.toHaveBeenCalledWith(1);
+  });
+
+  it("searches full message history from the main window's received pane", async () => {
+    const old = Date.UTC(2026, 7, 27, 18, 0, 0);
+    invokeMock.mockImplementation((cmd: string, payload?: any) => {
+      if (cmd === "load_settings") return Promise.resolve(DEFAULT_SETTINGS);
+      if (cmd === "load_received_messages") return Promise.resolve([]);
+      if (cmd === "get_web_server_status") return Promise.resolve({ enabled: false, port: 18420, url: null });
+      if (cmd === "get_manual_beacon_cooldown_remaining") return Promise.resolve(0);
+      if (cmd === "search_received_messages" && payload?.query === "potluck") {
+        return Promise.resolve([
+          { id: 1, uuid: "u-1", seq: 7, timestamp: old, from: "W6TEST-1", to: "WT1W-15", body: "Bring a dish to the potluck", aprsType: "msg" },
+        ]);
+      }
+      return Promise.resolve(undefined);
+    });
+    render(<App />);
+
+    fireEvent.change(await screen.findByLabelText("Search message history"), { target: { value: "potluck" } });
+
+    expect(await screen.findByText("Bring a dish to the potluck")).toBeInTheDocument();
+    expect(invokeMock).toHaveBeenCalledWith("search_received_messages", { query: "potluck" });
+    expect(screen.getByText(new Date(old).toLocaleString())).toBeInTheDocument();
+  });
+
+  it("shows UTC and local time in the header row", async () => {
+    render(<App />);
+    const clock = await screen.findByTitle("UTC and local time");
+    expect(clock.closest("header")).toBeInTheDocument();
+    expect(clock.textContent).toMatch(/^\d{2}:\d{2}Z \d{2}:\d{2} \S+$/);
+  });
+
+  it("formats the header clock as 24-hour UTC and local hh:mm", () => {
+    const when = new Date(Date.UTC(2026, 9, 12, 15, 8, 30));
+    const [utc] = formatHeaderClock(when).split(" ");
+    expect(utc).toBe("15:08Z");
+  });
+
+  it("filters both panes from the one search field by Sent Messages", async () => {
+    invokeMock.mockImplementation((cmd: string, payload?: any) => {
+      if (cmd === "load_settings") return Promise.resolve(DEFAULT_SETTINGS);
+      if (cmd === "load_received_messages") return Promise.resolve([]);
+      if (cmd === "get_web_server_status") return Promise.resolve({ enabled: false, port: 18420, url: null });
+      if (cmd === "get_manual_beacon_cooldown_remaining") return Promise.resolve(0);
+      if (cmd === "search_received_messages" && payload?.query === "net") {
+        return Promise.resolve([
+          { uuid: "r-1", seq: 9, timestamp: Date.now(), from: "N6TEST-7", to: "WT1W-15", body: "Are you on the net", aprsType: "msg" },
+        ]);
+      }
+      if (cmd === "search_sent_messages" && payload?.query === "net") {
+        return Promise.resolve([
+          { uuid: "s-1", seq: 3, timestamp: Date.now(), destination: "N6TEST-7", body: "See you on the net", status: "acked", hidden: true },
+        ]);
+      }
+      return Promise.resolve(undefined);
+    });
+    render(<App />);
+
+    const field = await screen.findByLabelText("Search message history");
+    expect(field.closest(".msg-pane")?.querySelector("h2")?.textContent).toBe("Sent Messages");
+    expect(screen.getAllByRole("searchbox")).toHaveLength(1);
+
+    fireEvent.change(field, { target: { value: "net" } });
+
+    const sentRow = (await screen.findByText("See you on the net")).closest(".msg-row") as HTMLElement;
+    expect(within(sentRow).getByText("hidden")).toBeInTheDocument();
+    expect(await screen.findByText("Are you on the net")).toBeInTheDocument();
+    expect(invokeMock).toHaveBeenCalledWith("search_sent_messages", { query: "net" });
+    expect(invokeMock).toHaveBeenCalledWith("search_received_messages", { query: "net" });
+  });
+
+  it("hides one sent message with the row's x, keeping it findable by search", async () => {
+    invokeMock.mockImplementation((cmd: string, payload?: any) => {
+      if (cmd === "load_settings") return Promise.resolve(DEFAULT_SETTINGS);
+      if (cmd === "load_received_messages") return Promise.resolve([]);
+      if (cmd === "load_sent_messages") {
+        return Promise.resolve([
+          { uuid: "s-1", seq: 2, timestamp: Date.now(), destination: "N6TEST-7", body: "Clear me", status: "acked" },
+          { uuid: "s-2", seq: 1, timestamp: Date.now() - 1_000, destination: "K6TEST-9", body: "Keep me", status: "acked" },
+        ]);
+      }
+      if (cmd === "get_web_server_status") return Promise.resolve({ enabled: false, port: 18420, url: null });
+      if (cmd === "get_manual_beacon_cooldown_remaining") return Promise.resolve(0);
+      if (cmd === "clear_messages") return Promise.resolve(payload?.uuids?.length ?? 0);
+      if (cmd === "search_received_messages") return Promise.resolve([]);
+      if (cmd === "search_sent_messages") {
+        return Promise.resolve([
+          { uuid: "s-1", seq: 2, timestamp: Date.now(), destination: "N6TEST-7", body: "Clear me", status: "acked", hidden: true },
+        ]);
+      }
+      return Promise.resolve(undefined);
+    });
+    render(<App />);
+
+    const row = (await screen.findByText("Clear me")).closest(".msg-row") as HTMLElement;
+    fireEvent.click(within(row).getByRole("button", { name: "Clear this message" }));
+
+    const dialog = await screen.findByRole("dialog", { name: "Clear messages" });
+    expect(within(dialog).getByRole("heading")).toHaveTextContent("Clear this message?");
+    expect(within(dialog).getByLabelText("Delete from database")).not.toBeChecked();
+    fireEvent.click(within(dialog).getByRole("button", { name: "Clear" }));
+
+    await waitFor(() => expect(screen.queryByText("Clear me")).not.toBeInTheDocument());
+    expect(invokeMock).toHaveBeenCalledWith("clear_messages", { list: "sent", uuids: ["s-1"], delete: false });
+    expect(screen.getByText("Keep me")).toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText("Search message history"), { target: { value: "clear" } });
+    const hit = (await screen.findByText("Clear me")).closest(".msg-row") as HTMLElement;
+    expect(within(hit).getByText("hidden")).toBeInTheDocument();
+  });
+
+  it("deletes only the received messages shown with Clear all and the database box checked", async () => {
+    invokeMock.mockImplementation((cmd: string) => {
+      if (cmd === "load_settings") return Promise.resolve(DEFAULT_SETTINGS);
+      if (cmd === "load_sent_messages") return Promise.resolve([]);
+      if (cmd === "load_received_messages") {
+        return Promise.resolve([
+          { uuid: "r-1", seq: 2, timestamp: Date.now(), from: "N6TEST-7", to: "WT1W-15", body: "First to go", aprsType: "msg" },
+          { uuid: "r-2", seq: 1, timestamp: Date.now() - 1_000, from: "K6TEST-9", to: "WT1W-15", body: "Second to go", aprsType: "msg" },
+        ]);
+      }
+      if (cmd === "clear_messages") return Promise.resolve(2);
+      if (cmd === "get_web_server_status") return Promise.resolve({ enabled: false, port: 18420, url: null });
+      if (cmd === "get_manual_beacon_cooldown_remaining") return Promise.resolve(0);
+      return Promise.resolve(undefined);
+    });
+    render(<App />);
+
+    await screen.findByText("First to go");
+    const header = screen.getByRole("heading", { name: "Received Messages" }).parentElement as HTMLElement;
+    fireEvent.click(within(header).getByRole("button", { name: "Clear all" }));
+
+    const dialog = await screen.findByRole("dialog", { name: "Clear messages" });
+    expect(within(dialog).getByRole("heading")).toHaveTextContent("Clear the 2 received messages shown?");
+    fireEvent.click(within(dialog).getByLabelText("Delete from database"));
+    fireEvent.click(within(dialog).getByRole("button", { name: "Delete" }));
+
+    await waitFor(() => expect(screen.queryByText("First to go")).not.toBeInTheDocument());
+    expect(screen.queryByText("Second to go")).not.toBeInTheDocument();
+    expect(invokeMock).toHaveBeenCalledWith("clear_messages", { list: "received", uuids: ["r-1", "r-2"], delete: true });
+  });
+
+  it("selects messages with a long press and clears the selection from one x", async () => {
+    invokeMock.mockImplementation((cmd: string) => {
+      if (cmd === "load_settings") return Promise.resolve(DEFAULT_SETTINGS);
+      if (cmd === "load_received_messages") return Promise.resolve([]);
+      if (cmd === "load_sent_messages") {
+        return Promise.resolve([
+          { uuid: "s-1", seq: 3, timestamp: Date.now(), destination: "N6TEST-7", body: "Pick one", status: "acked" },
+          { uuid: "s-2", seq: 2, timestamp: Date.now() - 1_000, destination: "N6TEST-7", body: "Skip me", status: "acked" },
+          { uuid: "s-3", seq: 1, timestamp: Date.now() - 2_000, destination: "K6TEST-9", body: "Pick two", status: "acked" },
+        ]);
+      }
+      if (cmd === "get_web_server_status") return Promise.resolve({ enabled: false, port: 18420, url: null });
+      if (cmd === "get_manual_beacon_cooldown_remaining") return Promise.resolve(0);
+      if (cmd === "clear_messages") return Promise.resolve(2);
+      return Promise.resolve(undefined);
+    });
+    render(<App />);
+
+    const first = (await screen.findByText("Pick one")).closest(".msg-item") as HTMLElement;
+    fireEvent.pointerDown(first, { button: 0 });
+    await new Promise((resolve) => setTimeout(resolve, 600));
+    fireEvent.pointerUp(first);
+    fireEvent.click(first);
+
+    const boxes = await screen.findAllByRole("checkbox", { name: "Select message" });
+    expect(boxes).toHaveLength(3);
+    expect(boxes[0]).toBeChecked();
+    expect(screen.getByText("1 selected")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByText("Pick two").closest(".msg-item") as HTMLElement);
+    expect(screen.getByText("2 selected")).toBeInTheDocument();
+
+    const row = screen.getByText("Pick two").closest(".msg-row") as HTMLElement;
+    fireEvent.click(within(row).getByRole("button", { name: "Clear this message" }));
+    const dialog = await screen.findByRole("dialog", { name: "Clear messages" });
+    expect(within(dialog).getByRole("heading")).toHaveTextContent("Clear these 2 sent messages?");
+    fireEvent.click(within(dialog).getByRole("button", { name: "Clear" }));
+
+    await waitFor(() => expect(screen.queryByText("Pick one")).not.toBeInTheDocument());
+    expect(screen.queryByText("Pick two")).not.toBeInTheDocument();
+    expect(screen.getByText("Skip me")).toBeInTheDocument();
+    expect(invokeMock).toHaveBeenCalledWith("clear_messages", { list: "sent", uuids: ["s-1", "s-3"], delete: false });
+    expect(screen.queryByRole("checkbox", { name: "Select message" })).not.toBeInTheDocument();
+  });
+
+  it("unhides a hidden search result and puts it back in its list", async () => {
+    const now = Date.now();
+    invokeMock.mockImplementation((cmd: string, payload?: any) => {
+      if (cmd === "load_settings") return Promise.resolve(DEFAULT_SETTINGS);
+      if (cmd === "load_received_messages") return Promise.resolve([]);
+      if (cmd === "load_sent_messages") {
+        return Promise.resolve([{ uuid: "s-2", seq: 1, timestamp: now - 5_000, destination: "N6TEST-7", body: "Still listed", status: "acked" }]);
+      }
+      if (cmd === "get_web_server_status") return Promise.resolve({ enabled: false, port: 18420, url: null });
+      if (cmd === "get_manual_beacon_cooldown_remaining") return Promise.resolve(0);
+      if (cmd === "search_received_messages") return Promise.resolve([]);
+      if (cmd === "search_sent_messages" && payload?.query === "back") {
+        return Promise.resolve([{ uuid: "s-1", seq: 2, timestamp: now, destination: "N6TEST-7", body: "Bring me back", status: "acked", hidden: true }]);
+      }
+      if (cmd === "restore_messages") return Promise.resolve(1);
+      return Promise.resolve(undefined);
+    });
+    render(<App />);
+
+    const field = await screen.findByLabelText("Search message history");
+    fireEvent.change(field, { target: { value: "back" } });
+    const hit = (await screen.findByText("Bring me back")).closest(".msg-row") as HTMLElement;
+    fireEvent.click(within(hit).getByRole("button", { name: "Unhide this message" }));
+
+    await waitFor(() => expect(within(hit).queryByText("hidden")).not.toBeInTheDocument());
+    expect(invokeMock).toHaveBeenCalledWith("restore_messages", { list: "sent", uuids: ["s-1"] });
+
+    fireEvent.change(field, { target: { value: "" } });
+    expect(await screen.findByText("Bring me back")).toBeInTheDocument();
+    expect(screen.getByText("Still listed")).toBeInTheDocument();
+  });
+
+  it("lists sent messages from earlier sessions and keeps their status current", async () => {
+    invokeMock.mockImplementation((cmd: string) => {
+      if (cmd === "load_settings") return Promise.resolve(DEFAULT_SETTINGS);
+      if (cmd === "load_received_messages") return Promise.resolve([]);
+      if (cmd === "load_sent_messages") {
+        return Promise.resolve([
+          { uuid: "s-1", seq: 4, timestamp: Date.now(), destination: "N6TEST-7", body: "See you on the net", status: "sent" },
+        ]);
+      }
+      if (cmd === "get_web_server_status") return Promise.resolve({ enabled: false, port: 18420, url: null });
+      if (cmd === "get_manual_beacon_cooldown_remaining") return Promise.resolve(0);
+      return Promise.resolve(undefined);
+    });
+    render(<App />);
+
+    const row = (await screen.findByText("See you on the net")).closest(".msg-item") as HTMLElement;
+    expect(within(row).getByText("sent")).toBeInTheDocument();
+
+    let deliveryHandler: ((event: unknown) => void) | undefined;
+    await waitFor(() => {
+      deliveryHandler = listenMock.mock.calls.find((call: any) => call[0] === "tnc_delivery")?.[1];
+      expect(deliveryHandler).toBeTruthy();
+    });
+    deliveryHandler?.({ payload: { id: 1, uuid: "s-1", status: "acked", attempts: 1, detail: "ack received" } });
+
+    await waitFor(() => expect(within(row).getByText("acked")).toBeInTheDocument());
+  });
+
   it("does not invoke connect_tnc when TNC port is invalid", async () => {
     invokeMock.mockImplementation((cmd: string) => {
       if (cmd === "load_settings") {
@@ -742,6 +1119,144 @@ describe("App", () => {
       expect.objectContaining({ callsign: "WT1W-15", host: "172.16.2.201" }),
     );
     expect(within(tncSection as HTMLElement).getByRole("button", { name: "Connect TNC" })).toBeEnabled();
+  });
+
+  it("keeps received messages across restarts instead of clearing them", async () => {
+    invokeMock.mockImplementation((cmd: string) => {
+      if (cmd === "load_received_messages") {
+        return Promise.resolve([
+          { uuid: "u-1", seq: 1, timestamp: Date.now() - 60_000, from: "N0CALL-1", to: "WT1W-15", body: "Stored before restart", aprsType: "msg" },
+        ]);
+      }
+      if (cmd === "get_web_server_status") {
+        return Promise.resolve({ enabled: false, port: null, url: null });
+      }
+      if (cmd === "get_manual_beacon_cooldown_remaining") {
+        return Promise.resolve(0);
+      }
+      return Promise.resolve(undefined);
+    });
+
+    render(<App />);
+
+    expect(await screen.findByText("Stored before restart")).toBeInTheDocument();
+    expect(invokeMock).not.toHaveBeenCalledWith("save_received_messages", expect.anything());
+  });
+
+  it("searches the full message history from the received messages window", async () => {
+    invokeMock.mockImplementation((cmd: string) => {
+      if (cmd === "load_settings") {
+        return Promise.resolve({ source: "WT1W-15", show_ack_messages: false, theme_mode: "system" });
+      }
+      if (cmd === "load_received_messages") {
+        return Promise.resolve([
+          { uuid: "u-new", seq: 900, timestamp: Date.now(), from: "W1AW", to: "WT1W-15", body: "Newest note", aprsType: "msg" },
+        ]);
+      }
+      if (cmd === "search_received_messages") {
+        return Promise.resolve([
+          { uuid: "u-old", seq: 12, timestamp: Date.now() - 86_400_000 * 40, from: "KM4ACK-7", to: "WT1W-15", body: "Net tonight at 8", aprsType: "msg" },
+        ]);
+      }
+      return Promise.resolve(undefined);
+    });
+
+    render(<ReceivedWindow />);
+    expect(await screen.findByText("Newest note")).toBeInTheDocument();
+
+    fireEvent.change(screen.getByRole("searchbox", { name: "Search message history" }), {
+      target: { value: "km4ack" },
+    });
+
+    expect(await screen.findByText("Net tonight at 8")).toBeInTheDocument();
+    expect(screen.queryByText("Newest note")).not.toBeInTheDocument();
+    expect(invokeMock).toHaveBeenCalledWith("search_received_messages", { query: "km4ack" });
+
+    fireEvent.change(screen.getByRole("searchbox", { name: "Search message history" }), {
+      target: { value: "" },
+    });
+    expect(await screen.findByText("Newest note")).toBeInTheDocument();
+  });
+
+  it("loads older pages of message history on request", async () => {
+    const newestPage = Array.from({ length: 200 }, (_, i) => ({
+      uuid: `u-${1000 - i}`,
+      seq: 1000 - i,
+      timestamp: Date.now() - i * 1000,
+      from: "W1AW",
+      to: "WT1W-15",
+      body: `Page one note ${1000 - i}`,
+      aprsType: "msg",
+    }));
+    invokeMock.mockImplementation((cmd: string, payload?: { beforeSeq?: number }) => {
+      if (cmd === "load_settings") {
+        return Promise.resolve({ source: "WT1W-15", show_ack_messages: false, theme_mode: "system" });
+      }
+      if (cmd === "load_received_messages") {
+        if (payload?.beforeSeq === 801) {
+          return Promise.resolve([
+            { uuid: "u-5", seq: 5, timestamp: Date.now() - 86_400_000 * 3, from: "W1AW", to: "WT1W-15", body: "From last week", aprsType: "msg" },
+          ]);
+        }
+        return Promise.resolve(newestPage);
+      }
+      return Promise.resolve(undefined);
+    });
+
+    render(<ReceivedWindow />);
+    expect(await screen.findByText("Page one note 1000")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Load older messages" }));
+
+    expect(await screen.findByText("From last week")).toBeInTheDocument();
+    expect(invokeMock).toHaveBeenCalledWith("load_received_messages", { beforeSeq: 801 });
+    expect(screen.queryByRole("button", { name: "Load older messages" })).not.toBeInTheDocument();
+  });
+
+  it("lists sent and received together in the pop-out Messages window", async () => {
+    const now = Date.now();
+    invokeMock.mockImplementation((cmd: string, payload?: any) => {
+      if (cmd === "load_settings") return Promise.resolve({ source: "WT1W-15", show_ack_messages: false, theme_mode: "system" });
+      if (cmd === "load_received_messages") {
+        return Promise.resolve([
+          { uuid: "r-2", seq: 2, timestamp: now - 1_000, from: "N6TEST-7", to: "WT1W-15", body: "Copy, see you there", aprsType: "msg" },
+          { uuid: "r-1", seq: 1, timestamp: now - 3_000, from: "WX6TEST", body: "_10111213c220s004g010t060", aprsType: "wx" },
+        ]);
+      }
+      if (cmd === "load_sent_messages") {
+        return Promise.resolve([
+          { uuid: "s-1", seq: 1, timestamp: now - 2_000, destination: "N6TEST-7", body: "On the net tonight?", status: "acked" },
+        ]);
+      }
+      if (cmd === "search_received_messages" && payload?.query === "net") return Promise.resolve([]);
+      if (cmd === "search_sent_messages" && payload?.query === "net") {
+        return Promise.resolve([
+          { uuid: "s-1", seq: 1, timestamp: now - 2_000, destination: "N6TEST-7", body: "On the net tonight?", status: "acked" },
+        ]);
+      }
+      return Promise.resolve(undefined);
+    });
+
+    const { container } = render(<ReceivedWindow />);
+
+    expect(await screen.findByText("On the net tonight?")).toBeInTheDocument();
+    expect(screen.getByText("Messages", { selector: ".received-window-title" })).toBeInTheDocument();
+    const bodies = () => Array.from(container.querySelectorAll(".received-window-list .msg-body")).map((el) => el.textContent);
+    await waitFor(() => {
+      expect(bodies()).toEqual(["Copy, see you there", "On the net tonight?", "_10111213c220s004g010t060"]);
+    });
+    const sentRow = screen.getByText("On the net tonight?").closest(".msg-item") as HTMLElement;
+    expect(within(sentRow).getByText("acked")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /^Weather/ }));
+    expect(bodies()).toEqual(["_10111213c220s004g010t060"]);
+
+    fireEvent.click(screen.getByRole("button", { name: /^All/ }));
+    fireEvent.change(screen.getByLabelText("Search message history"), { target: { value: "net" } });
+    await waitFor(() => {
+      expect(bodies()).toEqual(["On the net tonight?"]);
+    });
+    expect(invokeMock).toHaveBeenCalledWith("search_sent_messages", { query: "net" });
   });
 
   it("opens a reply dialog from the popped-out received messages window and sends a reply", async () => {
@@ -911,6 +1426,16 @@ describe("App", () => {
 });
 
 describe("PreferencesWindow", () => {
+  it("closes the window when Escape is pressed", async () => {
+    destroyWindowMock.mockClear();
+    render(<PreferencesWindow />);
+    await screen.findByRole("heading", { name: "Station" });
+
+    fireEvent.keyDown(window, { key: "Escape" });
+
+    await waitFor(() => expect(destroyWindowMock).toHaveBeenCalled());
+  });
+
   it("loads blank first-run fields and saves normalized preferences", async () => {
     invokeMock.mockImplementation((cmd: string, payload?: any) => {
       if (cmd === "load_settings") {

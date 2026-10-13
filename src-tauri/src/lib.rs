@@ -2,6 +2,7 @@ mod ax25;
 mod agw;
 mod aprsis;
 mod kiss;
+mod message_store;
 mod runtime;
 mod settings;
 mod tnc;
@@ -29,13 +30,22 @@ fn open_preferences_window(app: &AppHandle) -> tauri::Result<()> {
         WebviewUrl::App("/#preferences".into()),
     )
     .title("APRSWolf Preferences")
-    .inner_size(720.0, 620.0)
+    // Wide enough for two columns of sections; the page then fits the
+    // height to its content (see fitWindowToContent in PreferencesWindow).
+    .inner_size(1000.0, 640.0)
     .min_inner_size(620.0, 520.0)
     .resizable(true)
     .build()?;
 
     focus_or_show(window);
     Ok(())
+}
+
+// Async so the window is built off the main thread; a sync command that
+// creates a window can deadlock on Windows.
+#[tauri::command]
+async fn open_preferences(app: AppHandle) -> Result<(), String> {
+    open_preferences_window(&app).map_err(|e| e.to_string())
 }
 
 fn open_help_window(app: &AppHandle) -> tauri::Result<()> {
@@ -119,6 +129,7 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
         .invoke_handler(tauri::generate_handler![
+            open_preferences,
             tnc::connect_tnc,
             tnc::disconnect_tnc,
             tnc::send_message,
@@ -129,8 +140,12 @@ pub fn run() {
             aprsis::disconnect_aprsis,
             settings::load_settings,
             settings::save_settings,
-            settings::load_received_messages,
-            settings::save_received_messages,
+            message_store::load_received_messages,
+            message_store::search_received_messages,
+            message_store::search_sent_messages,
+            message_store::clear_messages,
+            message_store::restore_messages,
+            message_store::load_sent_messages,
             tnc::send_beacon,
             webserver::get_web_server_status,
             webserver::enable_web_server,

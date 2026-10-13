@@ -21,9 +21,36 @@ import { type AppSettingsPayload, type ReceivedFilter, type ThemeMode, FILTER_OP
 import {
   isReceivedWindowOpen,
   publishReceivedSnapshot,
+  publishSentSnapshot,
+  type SentItem,
+  subscribeMessagesCleared,
+  subscribeMessagesRestored,
+  subscribePopoutFocus,
+  type MessagesCleared,
+  type MessagesRestored,
   subscribeReceivedWindowState,
   type ReceivedItem,
 } from "./receivedBus";
+import { useToMeUnread } from "./lib/useToMeUnread";
+import { setAppBadge } from "./lib/appBadge";
+import { useWindowFocused } from "./lib/useWindowFocused";
+import UnreadDot from "./UnreadDot";
+import HeaderClock from "./HeaderClock";
+import ClearDialog, { type ClearRequest } from "./ClearDialog";
+import MessageRowActions from "./MessageRowActions";
+import { rowClass, SelectBox, SelectionHeader } from "./MessageSelection";
+import { useSelection, type Selection } from "./lib/useSelection";
+import {
+  clearMessages,
+  dropCleared,
+  formatReceivedTime,
+  insertRestored,
+  markCleared,
+  markRestored,
+  restoreMessages,
+  useMessageSearch,
+  type MessageGroups,
+} from "./lib/messageHistory";
 import packageJson from "../package.json";
 
 type StatusPayload = {
@@ -33,6 +60,7 @@ type StatusPayload = {
 
 type DeliveryPayload = {
   id: number;
+  uuid?: string;
   status: "queued" | "sent" | "acked" | "failed" | "expired";
   attempts: number;
   detail?: string | null;
@@ -42,14 +70,6 @@ type WebServerStatusPayload = {
   enabled: boolean;
   port?: number | null;
   url?: string | null;
-};
-
-type SentItem = {
-  id: number;
-  timestamp: number;
-  destination: string;
-  body: string;
-  status: "queued" | "sent" | "acked" | "failed" | "expired";
 };
 
 type LogItem = {
@@ -63,8 +83,13 @@ type ActivityNotice = {
   text: string;
 };
 
-// Matches the backend's MAX_RECEIVED_MESSAGES cap.
+// Matches the backend's PAGE_SIZE: windows hold one page of the message
+// history in memory; older messages stay in the database.
 const MAX_RECEIVED_ITEMS = 200;
+// Shown as the tooltip on the window's title; it never changes, so it no
+// longer takes a panel of its own.
+const APP_TAGLINE =
+  "Control Center: operate APRSWolf from one place. Use this window for live connections, messaging, beacons, and traffic review. Open Preferences for saved station, transport, and remote-control settings.";
 
 function App() {
   const isTauriRuntime = Boolean((globalThis as { isTauri?: boolean }).isTauri);
@@ -101,6 +126,7 @@ function App() {
   const [autoBeaconIntervalSecs, setAutoBeaconIntervalSecs] = useState(0);
   const [autoBeaconOnConnect, setAutoBeaconOnConnect] = useState(false);
   const [playMessageSound, setPlayMessageSound] = useState(true);
+  const [showAppBadge, setShowAppBadge] = useState(true);
   const [promiscuousBaseCallsign, setPromiscuousBaseCallsign] = useState(false);
   const [themeMode, setThemeMode] = useState<ThemeMode>("system");
   const [msgFontSize, setMsgFontSize] = useState(15);
@@ -143,6 +169,7 @@ function App() {
     setAutoBeaconIntervalSecs(typeof s.auto_beacon_interval_secs === "number" ? s.auto_beacon_interval_secs : 0);
     setAutoBeaconOnConnect(s.auto_beacon_on_connect ?? false);
     setPlayMessageSound(s.play_message_sound ?? true);
+    setShowAppBadge(s.show_app_badge ?? true);
     setPromiscuousBaseCallsign(Boolean(s.promiscuous_base_callsign));
     if (s.theme_mode === "light" || s.theme_mode === "dark" || s.theme_mode === "system") {
       setThemeMode(s.theme_mode);
@@ -297,15 +324,41 @@ function App() {
         settingsLoaded.current = true;
         applySettings(s);
       } catch {/* use defaults */}
-      // Clear persisted received messages and expire old queue entries so each
-      // session starts clean.
+      // Expire old queue entries so each session starts with an empty queue.
       // Also clear the pop-out window state key — if the app crashed while the
       // pop-out was open, the key would be left set and the embedded pane would
       // remain permanently disabled.
       try { window.localStorage.removeItem("aprswolf-received-window-open"); } catch {/* ignore */}
       setReceivedWindowOpen(false);
-      invoke("save_received_messages", { messages: [] }).catch(() => {/* ignore */});
-      invoke("clear_queue").catch(() => {/* ignore */});
+      // Awaited so the sent history below already shows what this expired.
+      await invoke("clear_queue").catch(() => {/* ignore */});
+      // Sent messages persist with their last delivery status.
+      try {
+        const sent = await invoke<SentItem[]>("load_sent_messages");
+        if (Array.isArray(sent) && sent.length > 0) {
+          setSentItems((prev) => {
+            const seen = new Set(prev.map((item) => item.uuid).filter(Boolean));
+            const older = sent
+              .filter((item) => !item.uuid || !seen.has(item.uuid))
+              .map((item) => ({ ...item, id: nextId() }));
+            return [...prev, ...older];
+          });
+        }
+      } catch {/* no sent history */}
+      // Received messages persist in the message history; show the newest
+      // page behind anything that arrived while this was loading.
+      try {
+        const stored = await invoke<ReceivedItem[]>("load_received_messages");
+        if (Array.isArray(stored) && stored.length > 0) {
+          setReceivedItems((prev) => {
+            const seen = new Set(prev.map((item) => item.uuid).filter(Boolean));
+            const older = stored
+              .filter((item) => !item.uuid || !seen.has(item.uuid))
+              .map((item) => ({ ...item, id: nextId() }));
+            return [...prev, ...older].slice(0, MAX_RECEIVED_ITEMS);
+          });
+        }
+      } catch {/* no history yet */}
       if (isTauriRuntime) {
         try {
           const status = await invoke<WebServerStatusPayload>("get_web_server_status");
@@ -330,18 +383,131 @@ function App() {
     return () => window.clearInterval(timer);
   }, [manualBeaconCooldownSeconds]);
 
-  // Persist received messages (debounced)
-  useEffect(() => {
-    if (!settingsLoaded.current) return;
-    const timer = setTimeout(() => {
-      invoke("save_received_messages", { messages: receivedItems }).catch(() => {/* ignore */});
-    }, 1000);
-    return () => clearTimeout(timer);
-  }, [receivedItems]);
-
   useEffect(() => {
     publishReceivedSnapshot(receivedItems);
   }, [receivedItems]);
+
+  useEffect(() => {
+    publishSentSnapshot(sentItems);
+  }, [sentItems]);
+
+  const unreadToMe = useToMeUnread(receivedItems, source, promiscuousBaseCallsign);
+
+  // One search box, in the Sent header, filters both panes: while it has
+  // text, each lists matches from the whole stored history instead of its
+  // live items.
+  const [searchQuery, setSearchQuery] = useState("");
+  const search = useMessageSearch(searchQuery);
+  const sentSearch = useMessageSearch<SentItem>(searchQuery, "search_sent_messages");
+  const shownSent = sentSearch.results ?? sentItems;
+  const shownReceived = search.results ?? receivedItems;
+
+  // Clearing and restoring messages, from this window or the pop-out:
+  // cleared messages leave the lists, search results keep hidden ones marked
+  // as hidden, and restored ones return to their list.
+  const [clearRequest, setClearRequest] = useState<ClearRequest | null>(null);
+  const sentSelection = useSelection(clearRequest !== null);
+  const receivedSelection = useSelection(clearRequest !== null);
+  const applyClearedRef = useRef<(cleared: MessagesCleared) => void>(() => {});
+  applyClearedRef.current = (cleared) => {
+    if (cleared.list === "sent") {
+      setSentItems((prev) => dropCleared(prev, cleared));
+      sentSearch.update((prev) => markCleared(prev, cleared));
+    } else {
+      setReceivedItems((prev) => dropCleared(prev, cleared));
+      search.update((prev) => markCleared(prev, cleared));
+    }
+  };
+  const applyRestoredRef = useRef<(restored: MessagesRestored) => void>(() => {});
+  applyRestoredRef.current = (restored) => {
+    const uuids = restored.items.map((item) => item.uuid).filter((uuid): uuid is string => Boolean(uuid));
+    if (restored.list === "sent") {
+      setSentItems((prev) => insertRestored(prev, restored.items));
+      sentSearch.update((prev) => markRestored(prev, uuids));
+    } else {
+      setReceivedItems((prev) => insertRestored(prev, restored.items).slice(0, MAX_RECEIVED_ITEMS));
+      search.update((prev) => markRestored(prev, uuids));
+    }
+  };
+  useEffect(() => subscribeMessagesCleared((cleared) => applyClearedRef.current(cleared)), []);
+  useEffect(() => subscribeMessagesRestored((restored) => applyRestoredRef.current(restored)), []);
+
+  // The messages an x or restore control acts on: every selected message when
+  // the row is part of a selection, otherwise the row alone.
+  function targetsFor<T extends { uuid?: string }>(item: T, shown: T[], selection: Selection): T[] {
+    if (selection.active && item.uuid && selection.isSelected(item.uuid)) {
+      return shown.filter((other) => other.uuid && selection.isSelected(other.uuid));
+    }
+    return [item];
+  }
+
+  function askClear(groups: MessageGroups, what: string, selection?: Selection) {
+    const all = [...groups.sent, ...groups.received];
+    if (all.length === 0) return;
+    setClearRequest({
+      what,
+      alreadyHidden: all.every((item) => item.hidden),
+      run: async (deleted) => {
+        try {
+          (await clearMessages(groups, deleted)).forEach((cleared) => applyClearedRef.current(cleared));
+          selection?.exit();
+        } catch (error) {
+          pushLog("error", `clear failed: ${String(error)}`);
+        }
+      },
+    });
+  }
+
+  function clearWhat(count: number, list: "sent" | "received"): string {
+    return count === 1 ? "this message" : `these ${count} ${list} messages`;
+  }
+
+  function askClearSent(item: SentItem) {
+    const targets = targetsFor(item, shownSent, sentSelection);
+    askClear({ sent: targets, received: [] }, clearWhat(targets.length, "sent"), sentSelection);
+  }
+
+  function askClearReceived(item: ReceivedItem) {
+    const targets = targetsFor(item, filteredReceived, receivedSelection);
+    askClear({ sent: [], received: targets }, clearWhat(targets.length, "received"), receivedSelection);
+  }
+
+  // Clear all takes exactly what the list shows now (up to the newest 200,
+  // after the filter chips and the ACK setting), never older history.
+  function askClearAllSent() {
+    const shown = shownSent.filter((item) => !item.hidden);
+    askClear({ sent: shown, received: [] }, `the ${shown.length} sent message${shown.length === 1 ? "" : "s"} shown`, sentSelection);
+  }
+
+  function askClearAllReceived() {
+    const shown = filteredReceived.filter((item) => !item.hidden);
+    askClear({ sent: [], received: shown }, `the ${shown.length} received message${shown.length === 1 ? "" : "s"} shown`, receivedSelection);
+  }
+
+  async function restore(groups: MessageGroups, selection: Selection) {
+    try {
+      (await restoreMessages(groups)).forEach((restored) => applyRestoredRef.current(restored));
+      selection.exit();
+    } catch (error) {
+      pushLog("error", `restore failed: ${String(error)}`);
+    }
+  }
+
+
+  // Focus marks messages read (see useToMeUnread), but the badge also hides
+  // the moment either window takes focus, before the read marker catches up.
+  const mainFocused = useWindowFocused();
+  const [popoutFocused, setPopoutFocused] = useState(false);
+  useEffect(() => subscribePopoutFocus(setPopoutFocused), []);
+  const appFocused = mainFocused || popoutFocused;
+
+  useEffect(() => {
+    const count = showAppBadge && !appFocused ? unreadToMe : 0;
+    // Moving focus between our own windows blurs one before the other
+    // reports focus; wait a beat so the badge doesn't flash.
+    const timer = window.setTimeout(() => { void setAppBadge(count); }, 150);
+    return () => window.clearTimeout(timer);
+  }, [showAppBadge, appFocused, unreadToMe]);
 
   const connected = isConnected;
   const canSend = isConnected || aprsisConnected;
@@ -464,7 +630,9 @@ function App() {
         const summary = summarySource && summaryDestination
           ? `${summarySource} > ${summaryDestination}${path}: ${normalizedBody}`
           : event.payload.text;
-        pushEventLog("rx", `RX ${event.payload.bytes}B ${summary} [${event.payload.payload_hex}]`);
+        const dup = event.payload.duplicate ? " (duplicate)" : "";
+        pushEventLog("rx", `RX ${event.payload.bytes}B ${summary}${dup} [${event.payload.payload_hex}]`);
+        if (event.payload.duplicate) return;
         setReceivedItems((prev) => {
           const now = Date.now();
           const from = event.payload.from;
@@ -493,6 +661,8 @@ function App() {
           return [
             {
               id: nextId(),
+              uuid: event.payload.uuid,
+              seq: event.payload.seq,
               timestamp: now,
               from,
               to: addressee,
@@ -516,9 +686,12 @@ function App() {
           kind,
           `delivery #${event.payload.id} ${event.payload.status} attempts=${event.payload.attempts}${detail}`,
         );
+        // Match on the history UUID, or on the queue number for a message
+        // the store never recorded.
+        const { uuid, id, status } = event.payload;
         setSentItems((prev) =>
           prev.map((item) =>
-            item.id === event.payload.id ? { ...item, status: event.payload.status } : item,
+            (uuid ? item.uuid === uuid : item.queueId === id) ? { ...item, status } : item,
           ),
         );
       });
@@ -699,7 +872,7 @@ function App() {
     try {
       const sourceCallsign = source.trim().toUpperCase();
       const digiPath = path.trim().toUpperCase();
-      const result = await invoke<{ id: number; status: string; bytes: number; payload_hex: string }>("send_message", {
+      const result = await invoke<{ id: number; uuid?: string; status: string; bytes: number; payload_hex: string }>("send_message", {
         source: sourceCallsign,
         destination: destinationCallsign,
         path: digiPath,
@@ -711,7 +884,9 @@ function App() {
       );
       setSentItems((prev) => [
         {
-          id: result.id,
+          id: nextId(),
+          queueId: result.id,
+          uuid: result.uuid,
           timestamp: Date.now(),
           destination: destinationCallsign,
           body: message,
@@ -752,7 +927,7 @@ function App() {
     try {
       const sourceCallsign = source.trim().toUpperCase();
       const digiPath = path.trim().toUpperCase();
-      const result = await invoke<{ id: number; status: string; bytes: number; payload_hex: string }>("send_message", {
+      const result = await invoke<{ id: number; uuid?: string; status: string; bytes: number; payload_hex: string }>("send_message", {
         source: sourceCallsign,
         destination: destinationCallsign,
         path: digiPath,
@@ -765,7 +940,9 @@ function App() {
       );
       setSentItems((prev) => [
         {
-          id: result.id,
+          id: nextId(),
+          queueId: result.id,
+          uuid: result.uuid,
           timestamp: Date.now(),
           destination: destinationCallsign,
           body: replyMessage,
@@ -819,7 +996,7 @@ function App() {
       }
       const win = new WebviewWindow("received-messages", {
         url: "/#received",
-        title: "APRSWolf — Received Messages",
+        title: "APRSWolf — Messages",
         width: 680,
         height: 560,
         minWidth: 460,
@@ -832,6 +1009,14 @@ function App() {
       });
     } catch {
       window.open("/#received", "received-messages", "width=680,height=560");
+    }
+  }
+
+  async function openPreferences() {
+    try {
+      await invoke("open_preferences");
+    } catch (e) {
+      pushLog("error", `preferences window failed: ${String(e)}`);
     }
   }
 
@@ -931,8 +1116,8 @@ function App() {
 
   const filteredReceived = useMemo(() => {
     const ackFiltered = showAckMessages
-      ? receivedItems
-      : receivedItems.filter((item) => !isAckMessageBody(item.body));
+      ? shownReceived
+      : shownReceived.filter((item) => !isAckMessageBody(item.body));
 
     if (activeReceivedFilters.length === 0 || activeReceivedFilters.includes("all")) {
       return ackFiltered;
@@ -946,7 +1131,7 @@ function App() {
         return kind === filter;
       });
     });
-  }, [activeReceivedFilters, promiscuousBaseCallsign, receivedItems, showAckMessages, source]);
+  }, [activeReceivedFilters, promiscuousBaseCallsign, shownReceived, showAckMessages, source]);
 
   function toggleReceivedFilter(key: ReceivedFilter) {
     setActiveReceivedFilters((current) => {
@@ -967,7 +1152,7 @@ function App() {
 
   const filterCounts = useMemo(() => {
     const counts: Record<ReceivedFilter, number> = {
-      all: receivedItems.length,
+      all: shownReceived.length,
       to_me: 0,
       bulletin: 0,
       qry: 0,
@@ -982,7 +1167,7 @@ function App() {
       other: 0,
     };
 
-    for (const item of receivedItems) {
+    for (const item of shownReceived) {
       const kind = (item.aprsType ?? "other") as ReceivedFilter;
       if (kind in counts && kind !== "all" && kind !== "to_me" && kind !== "bulletin") {
         counts[kind] += 1;
@@ -1000,14 +1185,14 @@ function App() {
     }
 
     return counts;
-  }, [promiscuousBaseCallsign, receivedItems, source]);
+  }, [promiscuousBaseCallsign, shownReceived, source]);
 
   const beaconConfigured = Boolean(beaconLat.trim() && beaconLon.trim() && beaconSymbol.trim());
   const tncConfigured = Boolean(source.trim() && host.trim() && port.trim());
   const aprsisConfigured = Boolean(source.trim() && aprsisHost.trim() && aprsisPort.trim() && aprsisPasscode.trim());
   const remoteSummary = webServerPort.trim()
-    ? `Port ${webServerPort.trim()}${webServerAutoStart ? " • auto-start on" : " • auto-start off"}`
-    : "Set a remote web port in Preferences.";
+    ? `port ${webServerPort.trim()} · auto-start ${webServerAutoStart ? "on" : "off"}`
+    : "no port set";
   const needsPreferencesSetup = !source.trim() || (!tncConfigured && !aprsisConfigured);
   const dashboardStatus = aprsisConnected
     ? "APRS-IS session is active."
@@ -1018,12 +1203,25 @@ function App() {
         : "Choose a transport and connect when ready.";
   return (
     <main className="app">
-      <header className="header-centered">
+      <header className="app-header">
         <img src={aprsWolfLogo} alt="APRSWolf logo" className="app-logo" />
-        <h1>APRSWolf</h1>
+        <h1 title={APP_TAGLINE}>APRSWolf</h1>
         <span className="app-version" aria-label={`Application version ${appVersion}`}>
           {appVersion}
         </span>
+        <p className="header-status" aria-live="polite">{dashboardStatus}</p>
+        <HeaderClock />
+        <button type="button" className="log-window-btn" onClick={openLogWindow}>Traffic Log ↗</button>
+        <button
+          type="button"
+          className="settings-btn"
+          onClick={openPreferences}
+          title="Preferences"
+          aria-label="Open Preferences"
+          disabled={!isTauriRuntime}
+        >
+          ⚙︎
+        </button>
       </header>
 
       {uiLocked ? (
@@ -1034,93 +1232,16 @@ function App() {
         </section>
       ) : null}
 
-      <section className="panel dashboard-hero-panel">
-        <div className="dashboard-hero-copy">
-          <p className="dashboard-kicker">Control Center</p>
-          <h2 className="dashboard-title">Operate APRSWolf from one place.</h2>
-          <p className="dashboard-body">
-            Use this window for live connections, messaging, beacons, and traffic review. Open Preferences for saved station, transport, and remote-control settings.
-          </p>
-          <p className="dashboard-status" aria-live="polite">{dashboardStatus}</p>
-          {needsPreferencesSetup ? (
-            <div className="dashboard-onboarding" aria-live="polite">
-              <strong>First run:</strong> Open Preferences to configure your station callsign and at least one connection path before trying to connect.
-            </div>
-          ) : null}
+      {needsPreferencesSetup ? (
+        <div className="dashboard-onboarding" aria-live="polite">
+          <strong>First run:</strong> Open Preferences to configure your station callsign and at least one connection path before trying to connect.
         </div>
-        <div className="dashboard-hero-actions">
-          <button type="button" className="secondary" onClick={openLogWindow}>Traffic Log ↗</button>
-        </div>
-      </section>
-
-      <section className="panel web-server-panel">
-        <div className="web-server-head">
-          <div>
-            <h2 className="section-title">Remote Web Control</h2>
-            <p className="web-server-copy">
-              Enable a dedicated control server in your browser. While it is active, desktop controls remain visible but locked until you disable remote control here or from the browser page.
-            </p>
-            <p className="settings-summary-note">{remoteSummary}</p>
-          </div>
-          <span className={`status status-text ${webServerEnabled ? "ok" : "off"}`}>
-            {webServerEnabled ? "Remote On" : "Remote Off"}
-          </span>
-        </div>
-        <div className="web-server-controls">
-          <div className="config-buttons web-server-buttons">
-            <button type="button" onClick={enableWebServer} disabled={uiLocked || webServerEnabled || !webServerPort.trim()}>Enable Remote</button>
-            <button type="button" className="secondary" onClick={disableWebServer} disabled={uiLocked || !webServerEnabled}>Disable Remote</button>
-            <button type="button" className="secondary" onClick={openRemoteWebUi} disabled={!webServerEnabled || !webServerUrl}>Open Remote UI</button>
-          </div>
-        </div>
-        {webServerEnabled && webServerUrl ? (
-          <p className="web-server-url">
-            <span>Remote URL: </span>
-            <a href={webServerUrl} onClick={(e) => { e.preventDefault(); openRemoteWebUi(); }}>{webServerUrl}</a>
-          </p>
-        ) : null}
-        {webServerEnabled ? <p className="web-server-lock-note">Desktop controls are locked while remote control is enabled.</p> : null}
-      </section>
+      ) : null}
 
       <fieldset className="runtime-fieldset" disabled={controlsLocked}>
-
-      <section className="panel config-row">
-        <div className="config-group">
-          <h2 className="section-title">Station</h2>
-          <div className="config-buttons">
-              <button type="button" onClick={sendBeacon} disabled={!canSend || !beaconConfigured || manualBeaconCooldownSeconds > 0}>
-                Beacon
-              </button>
-              {manualBeaconCooldownSeconds > 0 ? (
-                <span className="beacon-cooldown" aria-live="polite">{beaconCooldownLabel}</span>
-              ) : null}
-          </div>
-        </div>
-        <div className="config-sep" />
-        <div className="config-group">
-          <h2 className="section-title">TNC (Dire Wolf)</h2>
-          <div className="config-buttons">
-            <button type="button" onClick={connect} disabled={!tncConfigured || tncSessionActive || tncBlockedByAprsis}>Connect TNC</button>
-            <button type="button" onClick={disconnect} disabled={!tncSessionActive}>Disconnect</button>
-            <button type="button" onClick={clearQueue}>Clear Q</button>
-            <button type="button" onClick={dumpQueue}>Dump Q</button>
-          </div>
-        </div>
-        <div className="config-sep" />
-        <div className="config-group">
-          <h2 className="section-title">APRS-IS</h2>
-          <p className="aprsis-filter-note">Direct APRS-IS sends ignore the RF path field; WIDE paths are only used on TNC/RF sends.</p>
-          <div className="config-buttons">
-            <button type="button" onClick={connectAprsIs} disabled={!aprsisConfigured || aprsisConnected || aprsisBlockedByTnc}>Connect APRS-IS</button>
-            <button type="button" onClick={disconnectAprsIs} disabled={!aprsisConnected}>Disconnect</button>
-          </div>
-        </div>
-        <p className="connection-note-inline">TNC &amp; APRS-IS are mutually exclusive.</p>
-      </section>
-
-      <section className="panel">
-        <form className="grid two" onSubmit={send}>
-          <label>
+      <section className="panel compose-panel">
+        <form className="compose-bar" onSubmit={send}>
+          <label className="compose-to">
             Message To
             <input
               value={destination}
@@ -1128,7 +1249,7 @@ function App() {
               placeholder="WXYO"
             />
           </label>
-          <label>
+          <label className="compose-message">
             Message
             <input
               value={message}
@@ -1144,111 +1265,171 @@ function App() {
         {!canSend ? <p className="compose-help">Connect TNC or APRS-IS to enable message sending.</p> : null}
       </section>
 
-      <div className="messages-scroll-region">
-        <div className="actions-bar">
-          <button type="button" className="log-window-btn" onClick={openLogWindow}>
-            Traffic Log ↗
-          </button>
+      {activityNotice ? (
+        <div className={`activity-strip activity-${activityNotice.kind}`} aria-live="polite">
+          <span className="activity-dot" />
+          <span className="activity-text">{activityNotice.text}</span>
         </div>
+      ) : null}
 
-        {activityNotice ? (
-          <div className={`activity-strip activity-${activityNotice.kind}`} aria-live="polite">
-            <span className="activity-dot" />
-            <span className="activity-text">{activityNotice.text}</span>
-          </div>
-        ) : null}
-
-        <section className="panel messages-panel">
-          <div className="msg-pane">
+      <section className="panel messages-panel">
+        <div className="msg-pane">
+          <div className="msg-pane-header">
             <h2>Sent Messages</h2>
-            <div className="msg-list">
-              {sentItems.length === 0 ? <p className="empty">No sent messages.</p> : null}
-              {sentItems.map((item) => (
-                <div key={item.id} className={`msg-item sent-item status-${item.status}`}>
+            <SelectionHeader selection={sentSelection} onClearAll={askClearAllSent} />
+            <input
+              type="search"
+              className="msg-pane-search"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.currentTarget.value)}
+              placeholder="Search all messages"
+              aria-label="Search message history"
+              title="Searches sent and received messages across the whole history"
+            />
+          </div>
+          <div className="msg-list">
+            {shownSent.length === 0 ? (
+              <p className="empty">{sentSearch.results ? "No sent messages match your search." : "No sent messages."}</p>
+            ) : null}
+            {shownSent.map((item) => (
+              <div key={item.uuid ?? item.id} className={rowClass(sentSelection, item.hidden)}>
+                <SelectBox selection={sentSelection} uuid={item.uuid} />
+                <div
+                  className={`msg-item sent-item status-${item.status}`}
+                  {...(item.uuid ? sentSelection.pressHandlers(item.uuid) : {})}
+                  onClick={() => {
+                    if (item.uuid) sentSelection.handleClick(item.uuid);
+                  }}
+                >
                   <div className="msg-item-top-row">
-                    <span className="msg-time">{new Date(item.timestamp).toLocaleTimeString()}</span>
+                    <span className="msg-time">{formatReceivedTime(item.timestamp)}</span>
                     <span className="msg-addr">▶ {item.destination}</span>
                     <span className={`msg-badge ${item.status}`}>{item.status}</span>
                   </div>
                   <div className="msg-body">{item.body}</div>
                 </div>
-              ))}
-            </div>
+                {item.uuid ? (
+                  <MessageRowActions
+                    hidden={item.hidden}
+                    onClear={() => askClearSent(item)}
+                    onRestore={() =>
+                      void restore({ sent: targetsFor(item, shownSent, sentSelection).filter((t) => t.hidden), received: [] }, sentSelection)
+                    }
+                  />
+                ) : null}
+              </div>
+            ))}
+            {sentSearch.results && sentSearch.hasMore ? (
+              <button type="button" className="secondary received-window-load-older" onClick={() => void sentSearch.loadMore()}>
+                Load older matches
+              </button>
+            ) : null}
           </div>
-          <div className="msg-pane">
-            <div className="msg-pane-header">
-              <h2>Received Messages</h2>
+        </div>
+        <div className="msg-pane">
+          <div className="msg-pane-header">
+            <h2>Received Messages</h2>
+            <SelectionHeader selection={receivedSelection} onClearAll={askClearAllReceived} />
+            <button type="button" className="log-window-btn" onClick={openReceivedWindow}>
+              {receivedWindowOpen ? "Focus Pop-Out ↗" : "Pop Out ↗"}
+            </button>
+          </div>
+          {receivedWindowOpen ? (
+            <div className="msg-popout-disabled" aria-live="polite">
+              <p className="msg-popout-disabled-copy">
+                Received messages are active in the popped-out window. This embedded pane is disabled until that window closes.
+              </p>
               <button type="button" className="log-window-btn" onClick={openReceivedWindow}>
-                {receivedWindowOpen ? "Focus Pop-Out ↗" : "Pop Out ↗"}
+                Bring Pop-Out Forward
               </button>
             </div>
-            {receivedWindowOpen ? (
-              <div className="msg-popout-disabled" aria-live="polite">
-                <p className="msg-popout-disabled-copy">
-                  Received messages are active in the popped-out window. This embedded pane is disabled until that window closes.
-                </p>
-                <button type="button" className="log-window-btn" onClick={openReceivedWindow}>
-                  Bring Pop-Out Forward
-                </button>
+          ) : (
+            <>
+              <div className="rx-filter-meta">
+                <label className="inline-toggle rx-filter-toggle">
+                  <input
+                    type="checkbox"
+                    checked={promiscuousBaseCallsign}
+                    onChange={(event) => setPromiscuousBaseCallsign(event.currentTarget.checked)}
+                  />
+                  Promiscuous Base-Call
+                </label>
               </div>
-            ) : (
-              <>
-                <div className="rx-filter-meta">
-                  <p className="rx-filter-help">
-                    Select one or more filters. "Messages" shows all APRS message frames. "To Me" only shows traffic addressed to your station.
-                  </p>
-                  <label className="inline-toggle rx-filter-toggle">
-                    <input
-                      type="checkbox"
-                      checked={promiscuousBaseCallsign}
-                      onChange={(event) => setPromiscuousBaseCallsign(event.currentTarget.checked)}
-                    />
-                    Promiscuous Base-Call
-                  </label>
-                </div>
-                <div className="rx-filter-bar" role="group" aria-label="Received message filters">
-                  {FILTER_OPTIONS.map(({ key, label }) => (
-                    <button
-                      key={key}
-                      type="button"
-                      className={`rx-filter-btn ${activeReceivedFilters.includes(key) ? "active" : ""}`}
-                      onClick={() => toggleReceivedFilter(key)}
-                      aria-pressed={activeReceivedFilters.includes(key)}
-                    >
-                      {label} <span className="rx-filter-count">{filterCounts[key]}</span>
-                    </button>
-                  ))}
-                </div>
-                <div className="msg-list">
-                  {filteredReceived.length === 0 ? (
-                    <p className="empty">
-                      {activeReceivedFilters.includes("to_me") && activeReceivedFilters.length === 1
+              <div
+                className="rx-filter-bar"
+                role="group"
+                aria-label="Received message filters"
+                title={'Select one or more filters. "Messages" shows all APRS message frames. "To Me" only shows traffic addressed to your station.'}
+              >
+                {FILTER_OPTIONS.map(({ key, label }) => (
+                  <button
+                    key={key}
+                    type="button"
+                    className={`rx-filter-btn ${activeReceivedFilters.includes(key) ? "active" : ""}`}
+                    onClick={() => toggleReceivedFilter(key)}
+                    aria-pressed={activeReceivedFilters.includes(key)}
+                  >
+                    {label} <span className="rx-filter-count">{filterCounts[key]}</span>
+                    {key === "to_me" ? <UnreadDot count={unreadToMe} /> : null}
+                  </button>
+                ))}
+              </div>
+              <div className="msg-list">
+                {filteredReceived.length === 0 ? (
+                  <p className="empty">
+                    {search.results
+                      ? "No messages match your search."
+                      : activeReceivedFilters.includes("to_me") && activeReceivedFilters.length === 1
                         ? "No messages addressed to you."
                         : "No received messages for this filter."}
-                    </p>
-                  ) : null}
-                  {filteredReceived.map((item) => (
+                  </p>
+                ) : null}
+                {filteredReceived.map((item) => (
+                  <div key={item.uuid ?? item.id} className={rowClass(receivedSelection, item.hidden)}>
+                    <SelectBox selection={receivedSelection} uuid={item.uuid} />
                     <button
-                      key={item.id}
                       type="button"
                       className="msg-item recv-item recv-clickable"
-                      onClick={() => openReplyDialog(item)}
+                      {...(item.uuid ? receivedSelection.pressHandlers(item.uuid) : {})}
+                      onClick={() => {
+                        if (item.uuid && receivedSelection.handleClick(item.uuid)) return;
+                        openReplyDialog(item);
+                      }}
                     >
                       <div className="msg-item-top-row">
-                        <span className="msg-time">{new Date(item.timestamp).toLocaleTimeString()}</span>
+                        <span className="msg-time">{formatReceivedTime(item.timestamp)}</span>
                         <span className="msg-addr">◀ {item.from}</span>
                         {item.aprsType && item.aprsType !== "other" ? <span className="msg-type-badge">{item.aprsType}</span> : null}
                         {item.micEDecoded ? <span className="mic-e-inline-badge">Mic-E</span> : null}
                       </div>
                       <div className="msg-body">{item.body}</div>
                     </button>
-                  ))}
-                </div>
-              </>
-            )}
-          </div>
-        </section>
-      </div>
+                    {item.uuid ? (
+                      <MessageRowActions
+                        hidden={item.hidden}
+                        onClear={() => askClearReceived(item)}
+                        onRestore={() =>
+                          void restore(
+                            { sent: [], received: targetsFor(item, filteredReceived, receivedSelection).filter((t) => t.hidden) },
+                            receivedSelection,
+                          )
+                        }
+                      />
+                    ) : null}
+                  </div>
+                ))}
+                {search.results && search.hasMore ? (
+                  <button type="button" className="secondary received-window-load-older" onClick={() => void search.loadMore()}>
+                    Load older matches
+                  </button>
+                ) : null}
+              </div>
+            </>
+          )}
+        </div>
+      </section>
+
+      <ClearDialog request={clearRequest} onClose={() => setClearRequest(null)} />
 
       {replyOpen ? (
         <div className="reply-overlay" role="dialog" aria-modal="true" aria-label="Reply to message">
@@ -1282,8 +1463,92 @@ function App() {
         </div>
       ) : null}
       </fieldset>
+
+      <section className="panel control-box" aria-label="Connections and remote control">
+        <div className="config-group">
+          <div className="config-head">
+            <h2 className="section-title">
+              <StatusDot on={isConnected || aprsisConnected} label={isConnected || aprsisConnected ? "Station on the air" : "Station off the air"} />
+              Station
+            </h2>
+            <span className="config-meta">{source.trim() || "no callsign set"}</span>
+          </div>
+          <div className="config-buttons">
+            <button type="button" onClick={sendBeacon} disabled={controlsLocked || !canSend || !beaconConfigured || manualBeaconCooldownSeconds > 0}>
+              Beacon
+            </button>
+            {manualBeaconCooldownSeconds > 0 ? (
+              <span className="beacon-cooldown" aria-live="polite">{beaconCooldownLabel}</span>
+            ) : null}
+          </div>
+        </div>
+        <div className="config-sep" />
+        <div className="config-group">
+          <div className="config-head">
+            <h2 className="section-title" title={TNC_TIP}>
+              <StatusDot on={isConnected} label={isConnected ? "TNC connected" : "TNC disconnected"} />
+              TNC (Dire Wolf)
+            </h2>
+            <span className="config-meta">{host.trim() && port.trim() ? `${host.trim()}:${port.trim()}` : "not set"}</span>
+          </div>
+          <div className="config-buttons">
+            <button type="button" onClick={connect} disabled={controlsLocked || !tncConfigured || tncSessionActive || tncBlockedByAprsis}>Connect TNC</button>
+            <button type="button" onClick={disconnect} disabled={controlsLocked || !tncSessionActive}>Disconnect</button>
+            <button type="button" onClick={clearQueue} disabled={controlsLocked}>Clear Q</button>
+            <button type="button" onClick={dumpQueue} disabled={controlsLocked}>Dump Q</button>
+          </div>
+        </div>
+        <div className="config-sep" />
+        <div className="config-group">
+          <div className="config-head">
+            <h2 className="section-title" title={APRSIS_TIP}>
+              <StatusDot on={aprsisConnected} label={aprsisConnected ? "APRS-IS connected" : "APRS-IS disconnected"} />
+              APRS-IS
+            </h2>
+            <span className="config-meta">{aprsisHost.trim() && aprsisPort.trim() ? `${aprsisHost.trim()}:${aprsisPort.trim()}` : "not set"}</span>
+          </div>
+          <div className="config-buttons">
+            <button type="button" onClick={connectAprsIs} disabled={controlsLocked || !aprsisConfigured || aprsisConnected || aprsisBlockedByTnc}>Connect APRS-IS</button>
+            <button type="button" onClick={disconnectAprsIs} disabled={controlsLocked || !aprsisConnected}>Disconnect</button>
+          </div>
+        </div>
+        <div className="config-sep" />
+        <div
+          className="config-group remote-group"
+          title="Runs a control page you can open in a browser. While it is on, the desktop controls stay visible but locked until you disable remote control here or from the browser page."
+        >
+          <div className="config-head">
+            <h2 className="section-title">
+              <StatusDot on={webServerEnabled} label={webServerEnabled ? "Remote control on" : "Remote control off"} />
+              Remote Web Control
+            </h2>
+            {webServerEnabled && webServerUrl ? (
+              <a className="config-meta" href={webServerUrl} onClick={(e) => { e.preventDefault(); openRemoteWebUi(); }}>{webServerUrl}</a>
+            ) : (
+              <span className="config-meta">{remoteSummary}</span>
+            )}
+          </div>
+          <div className="config-buttons">
+            <button type="button" onClick={enableWebServer} disabled={uiLocked || webServerEnabled || !webServerPort.trim()}>Enable Remote</button>
+            <button type="button" className="secondary" onClick={disableWebServer} disabled={uiLocked || !webServerEnabled}>Disable Remote</button>
+            <button type="button" className="secondary" onClick={openRemoteWebUi} disabled={!webServerEnabled || !webServerUrl}>Open Remote UI</button>
+          </div>
+          {webServerEnabled ? <p className="web-server-lock-note">Desktop controls are locked while remote control is enabled.</p> : null}
+        </div>
+      </section>
     </main>
   );
+}
+
+const TNC_TIP =
+  "TNC and APRS-IS are mutually exclusive: connect one at a time. TNC sends go out over RF and use the WIDE digi path.";
+const APRSIS_TIP =
+  "TNC and APRS-IS are mutually exclusive: connect one at a time. Direct APRS-IS sends ignore the RF digi path; WIDE paths are only used on TNC/RF sends.";
+
+function StatusDot({ on, label }: { on: boolean; label: string }) {
+  // Hidden from the accessible name so headings read as their titles; the
+  // hover tooltip carries the state.
+  return <span className={`status-dot ${on ? "on" : "off"}`} aria-hidden="true" title={label} />;
 }
 
 export default App;

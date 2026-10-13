@@ -423,10 +423,17 @@ pub async fn connect_aprsis(
                                             }
                                         }
                                     }
-                                    if let Ok(value) = serde_json::to_value(&msg) {
-                                        let _ = crate::settings::append_received_message(app_clone.clone(), value);
+                                    // Store it in the message history, then hand it to the
+                                    // windows stamped with its stored UUID and sequence.
+                                    match serde_json::to_value(&msg) {
+                                        Ok(mut value) => {
+                                            crate::message_store::record_received(&app_clone, &mut value);
+                                            let _ = app_clone.emit("tnc_message", value);
+                                        }
+                                        Err(_) => {
+                                            let _ = app_clone.emit("tnc_message", msg);
+                                        }
                                     }
-                                    let _ = app_clone.emit("tnc_message", msg);
                                 }
                             }
                         }

@@ -1,18 +1,11 @@
 use std::fs;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{OnceLock, RwLock};
-use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tauri::{AppHandle, Emitter, Manager};
 
 const SETTINGS_FILE: &str = "settings.json";
-const RECEIVED_MESSAGES_FILE: &str = "received_messages.json";
-const MAX_RECEIVED_MESSAGES: usize = 200;
-/// Debounce window for received-message disk flushes. Appends are O(1) in
-/// memory; at most one write per window no matter how busy the feed is.
-const RECEIVED_FLUSH_DEBOUNCE: Duration = Duration::from_secs(5);
 
 /// In-memory settings cache. The settings file is only written by this app,
 /// so a read-through cache invalidated on save is always coherent, and the
@@ -23,15 +16,6 @@ fn settings_cache() -> &'static RwLock<Option<AppSettings>> {
     SETTINGS_CACHE.get_or_init(|| RwLock::new(None))
 }
 
-/// In-memory received-message store (source of truth while running).
-static RECEIVED_CACHE: OnceLock<RwLock<Option<Vec<Value>>>> = OnceLock::new();
-/// Notifies the single long-lived flush worker that a write is needed.
-static RECEIVED_FLUSH_NOTIFY: OnceLock<tokio::sync::Notify> = OnceLock::new();
-static RECEIVED_FLUSHER_STARTED: AtomicBool = AtomicBool::new(false);
-
-fn received_cache() -> &'static RwLock<Option<Vec<Value>>> {
-    RECEIVED_CACHE.get_or_init(|| RwLock::new(None))
-}
 
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(default)]
@@ -57,8 +41,15 @@ pub struct AppSettings {
     pub web_server_token: String,
     pub auto_beacon_on_connect: bool,
     pub auto_beacon_interval_secs: u32,
+    /// Days to keep positions, weather, telemetry and the other short-lived
+    /// packet types in the message history; 0 keeps everything. Messages,
+    /// queries and bulletins are kept regardless.
+    pub short_lived_retention_days: u32,
     pub show_ack_messages: bool,
     pub play_message_sound: bool,
+    /// Show the unread To Me count on the app icon (dock badge, or a
+    /// taskbar overlay on Windows).
+    pub show_app_badge: bool,
     pub promiscuous_base_callsign: bool,
     pub theme_mode: String,
     pub msg_font_size: u32,
@@ -84,8 +75,10 @@ impl Default for AppSettings {
             web_server_token: String::new(),
             auto_beacon_on_connect: false,
             auto_beacon_interval_secs: 0,
+            short_lived_retention_days: 7,
             show_ack_messages: false,
             play_message_sound: true,
+            show_app_badge: true,
             promiscuous_base_callsign: false,
             theme_mode: "system".to_string(),
             msg_font_size: 15,
@@ -140,7 +133,7 @@ fn settings_path(app: &AppHandle) -> Result<std::path::PathBuf, String> {
     Ok(dir.join(SETTINGS_FILE))
 }
 
-fn unwrap_third_party_info(raw: &str) -> Option<&str> {
+pub(crate) fn unwrap_third_party_info(raw: &str) -> Option<&str> {
     let trimmed = raw.trim();
     let inner = trimmed.strip_prefix('}')?;
     let colon = inner.find(':')?;
@@ -358,7 +351,7 @@ pub fn normalize_received_fields(input: NormalizeFieldsInput) -> NormalizedRecei
     }
 }
 
-fn normalize_received_message(mut message: Value) -> Value {
+pub(crate) fn normalize_received_message(mut message: Value) -> Value {
     let Some(obj) = message.as_object_mut() else {
         return message;
     };
@@ -396,9 +389,6 @@ fn normalize_received_message(mut message: Value) -> Value {
     message
 }
 
-fn normalize_received_messages(messages: Vec<Value>) -> Vec<Value> {
-    messages.into_iter().map(normalize_received_message).collect()
-}
 
 #[tauri::command]
 pub fn load_settings(app: AppHandle) -> AppSettings {
@@ -460,117 +450,6 @@ pub fn save_settings(app: AppHandle, settings: serde_json::Value) -> Result<(), 
     *settings_cache().write().unwrap() = Some(merged_settings.clone());
     app.emit("settings_updated", merged_settings)
         .map_err(|err| format!("failed to broadcast settings update: {err}"))
-}
-
-#[tauri::command]
-pub fn load_received_messages(app: AppHandle) -> Vec<serde_json::Value> {
-    if let Some(cached) = received_cache().read().unwrap().as_ref() {
-        return cached.clone();
-    }
-
-    let messages = load_received_from_disk(&app);
-    *received_cache().write().unwrap() = Some(messages.clone());
-    messages
-}
-
-fn load_received_from_disk(app: &AppHandle) -> Vec<serde_json::Value> {
-    let dir = match app.path().app_data_dir() {
-        Ok(d) => d,
-        Err(_) => return Vec::new(),
-    };
-    let path = dir.join(RECEIVED_MESSAGES_FILE);
-    if !path.exists() {
-        return Vec::new();
-    }
-    let raw = match fs::read_to_string(&path) {
-        Ok(s) => s,
-        Err(_) => return Vec::new(),
-    };
-    let mut messages = normalize_received_messages(
-        serde_json::from_str::<Vec<serde_json::Value>>(&raw).unwrap_or_default(),
-    );
-    messages.truncate(MAX_RECEIVED_MESSAGES);
-    messages
-}
-
-/// Ensure the in-memory received store is populated from disk (first use).
-fn ensure_received_cache(app: &AppHandle) {
-    if received_cache().read().unwrap().is_some() {
-        return;
-    }
-    let loaded = load_received_from_disk(app);
-    let mut guard = received_cache().write().unwrap();
-    if guard.is_none() {
-        *guard = Some(loaded);
-    }
-}
-
-#[tauri::command]
-pub fn save_received_messages(
-    app: AppHandle,
-    mut messages: Vec<serde_json::Value>,
-) -> Result<(), String> {
-    let dir = app
-        .path()
-        .app_data_dir()
-        .map_err(|err| format!("failed to resolve app data directory: {err}"))?;
-    fs::create_dir_all(&dir)
-        .map_err(|err| format!("failed to create app data directory: {err}"))?;
-    messages = normalize_received_messages(messages);
-    messages.truncate(MAX_RECEIVED_MESSAGES);
-    *received_cache().write().unwrap() = Some(messages.clone());
-    let json = serde_json::to_string_pretty(&messages)
-        .map_err(|err| format!("failed to serialize received messages: {err}"))?;
-    write_atomic(&dir.join(RECEIVED_MESSAGES_FILE), &json)
-        .map_err(|err| format!("failed to write received messages file: {err}"))
-}
-
-/// Append one received message. O(1) in memory; the disk flush is debounced
-/// through a single long-lived worker so a busy feed causes at most one file
-/// write per RECEIVED_FLUSH_DEBOUNCE window instead of one write per packet.
-///
-/// Trade-off: up to ~5s of received messages can be lost on an ungraceful
-/// quit (the outbound queue is intentionally non-persistent already).
-pub fn append_received_message(app: AppHandle, message: serde_json::Value) -> Result<(), String> {
-    ensure_received_cache(&app);
-    {
-        let mut guard = received_cache().write().unwrap();
-        let messages = guard.as_mut().expect("received cache initialized");
-        messages.insert(0, normalize_received_message(message));
-        messages.truncate(MAX_RECEIVED_MESSAGES);
-    }
-    schedule_received_flush(app);
-    Ok(())
-}
-
-fn schedule_received_flush(app: AppHandle) {
-    let notify = RECEIVED_FLUSH_NOTIFY.get_or_init(tokio::sync::Notify::new);
-
-    if !RECEIVED_FLUSHER_STARTED.swap(true, Ordering::SeqCst) {
-        let worker_app = app.clone();
-        tauri::async_runtime::spawn(async move {
-            let notify = RECEIVED_FLUSH_NOTIFY
-                .get()
-                .expect("flush notify initialized");
-            loop {
-                notify.notified().await;
-                // Coalesce a burst of appends into one write.
-                tokio::time::sleep(RECEIVED_FLUSH_DEBOUNCE).await;
-
-                let snapshot = received_cache().read().unwrap().clone().unwrap_or_default();
-                if let Ok(dir) = worker_app.path().app_data_dir() {
-                    if let Ok(json) = serde_json::to_string_pretty(&snapshot) {
-                        let _ = write_atomic(&dir.join(RECEIVED_MESSAGES_FILE), &json);
-                    }
-                }
-                // Any notify that arrived during the sleep leaves a permit, so
-                // the loop wakes immediately and flushes again — no append is
-                // ever left unflushed.
-            }
-        });
-    }
-
-    notify.notify_one();
 }
 
 #[cfg(test)]

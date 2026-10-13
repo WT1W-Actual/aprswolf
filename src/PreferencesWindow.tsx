@@ -27,12 +27,35 @@ const EMPTY_SETTINGS: AppSettingsPayload = {
   web_server_token: "",
   auto_beacon_on_connect: false,
   auto_beacon_interval_secs: 0,
+  short_lived_retention_days: 7,
   show_ack_messages: false,
   play_message_sound: true,
+  show_app_badge: true,
   promiscuous_base_callsign: false,
   theme_mode: "system",
   msg_font_size: 15,
 };
+
+// Grow or shrink the window so every section shows without scrolling,
+// capped at the screen's usable height (the title bar sits outside it).
+async function fitWindowToContent() {
+  if (!(globalThis as { isTauri?: boolean }).isTauri) return;
+  const form = document.querySelector<HTMLElement>(".preferences-window-body");
+  if (!form) return;
+  const TITLE_BAR = 32;
+  // The form scrolls inside the window, so whatever it can't show is the
+  // height the window is short by (negative when the window is too tall).
+  const wanted = window.innerHeight + (form.scrollHeight - form.clientHeight);
+  const height = Math.min(wanted, window.screen.availHeight - TITLE_BAR);
+  try {
+    const { getCurrentWindow, LogicalSize } = await import("@tauri-apps/api/window");
+    const win = getCurrentWindow();
+    await win.setSize(new LogicalSize(window.innerWidth, height));
+    await win.center();
+  } catch {
+    // Keep the opening size if the window can't be resized.
+  }
+}
 
 function PreferencesWindow() {
   const [settings, setSettings] = useState<AppSettingsPayload>(EMPTY_SETTINGS);
@@ -41,6 +64,7 @@ function PreferencesWindow() {
   // Tracks the last passcode this window derived itself, so callsign edits
   // only auto-derive when the user hasn't typed a manual passcode.
   const lastDerivedPasscode = useRef("");
+  const [loaded, setLoaded] = useState(false);
 
   useEffect(() => {
     let mounted = true;
@@ -61,12 +85,19 @@ function PreferencesWindow() {
         if (!mounted) return;
         setSettings(EMPTY_SETTINGS);
       }
+      setLoaded(true);
     })();
 
     return () => {
       mounted = false;
     };
   }, []);
+
+  useEffect(() => {
+    if (!loaded) return;
+    const frame = requestAnimationFrame(() => { void fitWindowToContent(); });
+    return () => cancelAnimationFrame(frame);
+  }, [loaded]);
 
   useEffect(() => {
     const media = window.matchMedia("(prefers-color-scheme: dark)");
@@ -187,6 +218,8 @@ function PreferencesWindow() {
       promiscuousBaseCallsign: s.promiscuous_base_callsign,
       themeMode: s.theme_mode,
       msgFontSize: s.msg_font_size,
+      shortLivedRetentionDays: s.short_lived_retention_days,
+      showAppBadge: s.show_app_badge,
     });
 
     try {
@@ -197,6 +230,14 @@ function PreferencesWindow() {
       setSaveMessage(`Save failed: ${String(error)}`);
     }
   }
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape" && !event.defaultPrevented) void closeWindow();
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, []);
 
   async function closeWindow() {
     try {
@@ -222,7 +263,7 @@ function PreferencesWindow() {
       </div>
 
       <form id="preferences-form" className="preferences-window-body" onSubmit={savePreferences}>
-        <section className="panel preferences-panel">
+        <section className="panel preferences-panel prefs-station">
           <h2 className="section-title">Station</h2>
           <div className="preferences-grid preferences-grid-three">
             <label>
@@ -282,6 +323,14 @@ function PreferencesWindow() {
             <label className="inline-toggle">
               <input
                 type="checkbox"
+                checked={settings.show_app_badge ?? true}
+                onChange={(event) => updateSetting("show_app_badge", event.currentTarget.checked)}
+              />
+              Show unread To Me count on the app icon
+            </label>
+            <label className="inline-toggle">
+              <input
+                type="checkbox"
                 checked={Boolean(settings.show_ack_messages)}
                 onChange={(event) => updateSetting("show_ack_messages", event.currentTarget.checked)}
               />
@@ -290,7 +339,7 @@ function PreferencesWindow() {
           </div>
         </section>
 
-        <section className="panel preferences-panel">
+        <section className="panel preferences-panel prefs-tnc">
           <h2 className="section-title">TNC (Dire Wolf)</h2>
           <div className="preferences-grid preferences-grid-two">
             <label>
@@ -314,7 +363,7 @@ function PreferencesWindow() {
           </div>
         </section>
 
-        <section className="panel preferences-panel">
+        <section className="panel preferences-panel prefs-aprsis">
           <h2 className="section-title">APRS-IS</h2>
           <div className="preferences-grid preferences-grid-four">
             <label>
@@ -361,7 +410,7 @@ function PreferencesWindow() {
           <p className="aprsis-filter-note">Optional. Enter only filter terms, not #filter. Examples: m/50, r/42.36/-71.06/25, t/WT1W.</p>
         </section>
 
-        <section className="panel preferences-panel">
+        <section className="panel preferences-panel prefs-beacon">
           <h2 className="section-title">Beacon</h2>
           <div className="preferences-grid preferences-grid-three">
             <label>
@@ -424,7 +473,25 @@ function PreferencesWindow() {
           </div>
         </section>
 
-        <section className="panel preferences-panel">
+        <section className="panel preferences-panel prefs-history">
+          <h2 className="section-title">Message History</h2>
+          <label>
+            Keep positions, weather and other short-lived packets for
+            <select
+              value={settings.short_lived_retention_days ?? 7}
+              onChange={(event) => updateSetting("short_lived_retention_days", Number(event.currentTarget.value))}
+              className="input-interval"
+            >
+              <option value={1}>1 day</option>
+              <option value={7}>7 days</option>
+              <option value={30}>30 days</option>
+              <option value={0}>Keep everything</option>
+            </select>
+            <span className="field-hint">Messages, queries and bulletins are always kept.</span>
+          </label>
+        </section>
+
+        <section className="panel preferences-panel prefs-remote">
           <h2 className="section-title">Remote Web Control</h2>
           <div className="preferences-grid preferences-grid-two">
             <label>
@@ -458,9 +525,11 @@ function PreferencesWindow() {
           </div>
         </section>
 
-        <div className={`preferences-save-status preferences-save-${saveState}`} aria-live="polite">
-          {saveMessage || "Changes here update the saved configuration used by the main app window."}
-        </div>
+        {saveMessage ? (
+          <div className={`preferences-save-status preferences-save-${saveState}`} aria-live="polite">
+            {saveMessage}
+          </div>
+        ) : null}
       </form>
     </div>
   );

@@ -52,6 +52,10 @@ export function isAckMessageBody(text: string): boolean {
   return /^ack[A-Za-z0-9]{1,5}$/i.test(text.trim());
 }
 
+export function isAckOrRejectBody(text: string): boolean {
+  return /^(ack|rej)[A-Za-z0-9]{1,5}$/i.test(text.trim());
+}
+
 // ── Message payload types ───────────────────────────────────
 
 export type MessagePayload = {
@@ -75,6 +79,12 @@ export type MessagePayload = {
   summary_source: string;
   summary_destination?: string | null;
   mic_e_text: string | null;
+  // Set by the backend once the packet is in the message history.
+  uuid?: string;
+  seq?: number;
+  // Another copy of a packet already stored (heard over a second path);
+  // uuid and seq then name the first copy's row.
+  duplicate?: boolean;
 };
 
 export function hasNormalizedMessagePayload(
@@ -127,6 +137,23 @@ export function matchesStationAddress(
   );
 }
 
+// To Me messages that arrived after the read marker, leaving out acks and
+// rejects, which answer our own sends rather than ask for attention.
+export function countUnreadToMe(
+  items: ReceivedItem[],
+  station: string,
+  allowBaseCallsign: boolean,
+  readAt: number,
+): number {
+  let count = 0;
+  for (const item of items) {
+    if (item.timestamp <= readAt) continue;
+    if (isAckOrRejectBody(item.body)) continue;
+    if (matchesStationAddress(item, station, allowBaseCallsign)) count += 1;
+  }
+  return count;
+}
+
 // ── Settings payload builder ─────────────────────────────────
 
 export type SettingsParams = {
@@ -151,6 +178,8 @@ export type SettingsParams = {
   promiscuousBaseCallsign?: boolean;
   themeMode?: "system" | "light" | "dark";
   msgFontSize?: number;
+  shortLivedRetentionDays?: number;
+  showAppBadge?: boolean;
 };
 
 /**
@@ -180,5 +209,11 @@ export function buildSettingsPayload(params: SettingsParams): Record<string, unk
     promiscuous_base_callsign: params.promiscuousBaseCallsign ?? false,
     theme_mode: params.themeMode ?? "system",
     msg_font_size: params.msgFontSize ?? 15,
+    // Sent only when the caller sets it, so a save from a window that
+    // doesn't show the retention choice can't reset it (the backend merges).
+    ...(params.shortLivedRetentionDays !== undefined
+      ? { short_lived_retention_days: params.shortLivedRetentionDays }
+      : {}),
+    ...(params.showAppBadge !== undefined ? { show_app_badge: params.showAppBadge } : {}),
   };
 }

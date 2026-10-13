@@ -57,72 +57,12 @@ body {
   min-height: 0;
 }
 
-.messages-scroll-region {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  flex: 1;
-  min-height: 0;
-  overflow-x: hidden;
-  overflow-y: auto;
-}
-
 .runtime-warning {
   border: 1px solid rgba(255, 184, 0, 0.45);
   background: rgba(255, 184, 0, 0.12);
   color: #ffe6a8;
   font-size: 0.95rem;
   line-height: 1.35;
-}
-
-.web-server-panel {
-  display: grid;
-  gap: 8px;
-}
-
-.dashboard-hero-panel {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 14px;
-}
-
-.dashboard-hero-copy {
-  display: grid;
-  gap: 6px;
-  min-width: 0;
-}
-
-.dashboard-kicker {
-  margin: 0;
-  color: #0f62a5;
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-}
-
-.dashboard-title {
-  margin: 0;
-  font-size: 18px;
-  line-height: 1.1;
-  letter-spacing: -0.02em;
-  color: #1d1d1f;
-}
-
-.dashboard-body {
-  margin: 0;
-  color: #4e5561;
-  font-size: 12px;
-  line-height: 1.45;
-  max-width: 62ch;
-}
-
-.dashboard-status {
-  margin: 0;
-  color: #1d1d1f;
-  font-size: 12px;
-  font-weight: 600;
 }
 
 .dashboard-onboarding {
@@ -136,85 +76,11 @@ body {
   line-height: 1.4;
 }
 
-.dashboard-hero-actions {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: flex-start;
-  justify-content: flex-end;
-  gap: 6px;
-  min-width: 220px;
-}
-
-.web-server-head {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 10px;
-}
-
-.web-server-copy {
-  margin: 0;
-  color: #6c6c70;
-  font-size: 11px;
-  line-height: 1.4;
-}
-
-.web-server-controls {
-  display: flex;
-  align-items: flex-end;
-  justify-content: space-between;
-  gap: 10px;
-  flex-wrap: wrap;
-}
-
-.web-server-buttons {
-  justify-content: flex-end;
-}
-
-.web-server-buttons button.secondary {
-  background: #dce9fb;
-  color: #0f3f77;
-  border-color: #89acd7;
-  font-weight: 600;
-}
-
-.web-server-buttons button.secondary:hover:not(:disabled) {
-  background: #c6ddfb;
-  border-color: #6f9ed6;
-}
-
-.web-server-buttons button.secondary:disabled {
-  opacity: 1;
-  background: #edf1f6;
-  color: #8b95a3;
-  border-color: #c7ced9;
-}
-
 .web-server-lock-note {
   margin: 0;
   color: #7a4a0c;
   font-size: 11px;
   font-weight: 500;
-}
-
-.web-server-url {
-  margin: 6px 0 0;
-  font-size: 12px;
-}
-
-.web-server-url span {
-  color: #6c6c70;
-}
-
-.web-server-url a {
-  color: #007aff;
-  text-decoration: none;
-  font-family: ui-monospace, "SF Mono", monospace;
-  user-select: all;
-}
-
-.web-server-url a:hover {
-  text-decoration: underline;
 }
 
 .beacon-cooldown {
@@ -240,31 +106,53 @@ body {
 }
 
 /* ── Header ────────────────────────────────────────────────── */
-.header-centered {
+.app-header {
   display: flex;
   align-items: center;
-  gap: 7px;
+  gap: 8px;
   flex-shrink: 0;
   padding: 0 2px;
+  min-width: 0;
 }
 
-.header-centered h1 {
+.app-header h1 {
   margin: 0;
   font-size: 15px;
   font-weight: 600;
   letter-spacing: -0.2px;
   color: #1d1d1f;
+  cursor: help;
+}
+
+/* Centered in the free space between the version and the clock. */
+.header-status {
+  margin: 0 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  font-weight: 600;
+  color: #3c3c43;
+}
+
+.header-clock {
+  flex-shrink: 0;
+  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 12px;
+  color: #6e6e73;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
 }
 
 .app-logo {
-  width: 28px;
-  height: 28px;
+  width: 22px;
+  height: 22px;
   border-radius: 6px;
   flex-shrink: 0;
 }
 
 .app-version {
-  margin-left: auto;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -328,18 +216,6 @@ body {
   padding: 0 8px;
 }
 
-.connection-note-inline {
-  width: 100%;
-  margin: 2px 0 0;
-  text-align: center;
-  color: #7a4a0c;
-  font-size: 11px;
-  font-weight: 500;
-  background: rgba(255, 149, 0, 0.08);
-  border-radius: 5px;
-  padding: 2px 6px;
-}
-
 .aprsis-filter-note {
   width: 100%;
   margin: 0;
@@ -353,14 +229,6 @@ body {
   font-size: 14px;
   font-weight: 600;
   color: #1d1d1f;
-}
-
-.settings-summary-note {
-  width: 100%;
-  margin: 0;
-  color: #6c6c70;
-  font-size: 11px;
-  line-height: 1.4;
 }
 
 /* ── Section titles (macOS-style compact secondary header) ─── */
@@ -421,6 +289,16 @@ input {
   color: #1d1d1f;
   width: 100%;
   line-height: 1;
+}
+
+/* The full-width text field rule above must not stretch checkboxes: a
+   stretched box pushes its label text to the far side of the row. */
+input[type="checkbox"],
+input[type="radio"] {
+  width: auto;
+  height: auto;
+  padding: 0;
+  flex: none;
 }
 
 input:focus {
@@ -509,8 +387,123 @@ button.secondary:hover:not(:disabled) {
 }
 
 /* ── Compose row ────────────────────────────────────────────── */
-.send {
-  grid-column: 1 / -1;
+.compose-bar {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+}
+
+.compose-to {
+  width: 130px;
+  flex-shrink: 0;
+}
+
+.compose-message {
+  flex: 1;
+  min-width: 0;
+}
+
+.compose-bar .send {
+  flex-shrink: 0;
+  min-width: 72px;
+}
+
+/* ── Control box (connections and remote control) ───────────── */
+/* One row of four groups spread edge to edge: Station starts at the left
+   edge, Remote ends at the right, separators sit midway between. Each group
+   reads title and settings on top, buttons below. Narrow windows wrap the
+   buttons inside a group rather than dropping a group to a new line. */
+.control-box {
+  display: flex;
+  flex-wrap: nowrap;
+  justify-content: space-between;
+  align-items: stretch;
+  gap: 4px 12px;
+}
+
+.control-box .config-group {
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: flex-start;
+  flex: 0 1 auto;
+  min-width: 0;
+}
+
+.control-box .config-buttons {
+  flex-wrap: wrap;
+}
+
+.config-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.config-head .section-title {
+  width: auto;
+  flex-shrink: 0;
+}
+
+.config-meta {
+  font-size: 11px;
+  color: #8e8e93;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+
+a.config-meta {
+  color: #007aff;
+  text-decoration: none;
+}
+
+a.config-meta:hover {
+  text-decoration: underline;
+}
+
+.unread-dot {
+  display: inline-block;
+  min-width: 16px;
+  height: 16px;
+  margin-left: 4px;
+  padding: 0 4px;
+  box-sizing: border-box;
+  border-radius: 8px;
+  background: #ff3b30;
+  color: #fff;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 16px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
+.status-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.status-dot.on {
+  background: #30d158;
+  box-shadow: 0 0 0 1px rgba(36, 138, 61, 0.5);
+}
+
+.status-dot.off {
+  background: #ff453a;
+  box-shadow: 0 0 0 1px rgba(176, 30, 24, 0.45);
+}
+
+.control-box .section-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
 }
 
 .compose-help {
@@ -521,12 +514,6 @@ button.secondary:hover:not(:disabled) {
 }
 
 /* ── Actions bar (between compose and messages) ─────────────── */
-.actions-bar {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  flex-shrink: 0;
-}
 
 /* body hides overflow app-wide, so the window is held to the viewport
    and the form scrolls under a fixed toolbar that keeps Save in reach. */
@@ -560,6 +547,27 @@ button.secondary:hover:not(:disabled) {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
+}
+
+/* Two columns in rows, so boxes side by side share top and bottom edges.
+   Station pairs with Beacon, TNC with APRS-IS, Message History with Remote. */
+form.preferences-window-body {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: stretch;
+  gap: 10px;
+}
+
+form.preferences-window-body > .prefs-station { grid-area: 1 / 1; }
+form.preferences-window-body > .prefs-beacon { grid-area: 1 / 2; }
+form.preferences-window-body > .prefs-tnc { grid-area: 2 / 1; }
+form.preferences-window-body > .prefs-aprsis { grid-area: 2 / 2; }
+form.preferences-window-body > .prefs-history { grid-area: 3 / 1; }
+form.preferences-window-body > .prefs-remote { grid-area: 3 / 2; }
+form.preferences-window-body > .preferences-save-status { grid-column: 1 / -1; }
+
+form.preferences-window-body .preferences-grid-four {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
 .preferences-panel {
@@ -730,6 +738,25 @@ button.secondary:hover:not(:disabled) {
   border-color: rgba(120, 120, 128, 0.28);
 }
 
+.settings-btn {
+  /* Bigger glyph in the same 22px box as Traffic Log, so the header row
+     keeps its height and alignment. */
+  font-size: 20px;
+  line-height: 22px;
+  height: 22px;
+  overflow: visible;
+  padding: 0 2px;
+  background: none;
+  border: 0;
+  box-shadow: none;
+  color: #6c6c70;
+}
+
+.settings-btn:hover:not(:disabled) {
+  background: none;
+  color: #1c1c1e;
+}
+
 /* ── Message panels ─────────────────────────────────────────── */
 .messages-panel {
   display: grid;
@@ -754,17 +781,31 @@ button.secondary:hover:not(:disabled) {
   color: #3c3c43;
 }
 
+.msg-pane-search {
+  flex: 0 1 200px;
+  min-width: 90px;
+  margin-left: auto;
+}
+
+/* Pop Out shares the Traffic Log button's auto margin; beside the search
+   field that would split the free space and leave a gap between them. */
+.msg-pane-search + .log-window-btn {
+  margin-left: 0;
+}
+
+/* Same for Traffic Log beside the header clock. */
+.header-clock + .log-window-btn {
+  margin-left: 0;
+}
+
 .msg-pane-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 6px;
-}
-
-.rx-filter-help {
-  margin: 0;
-  font-size: 11px;
-  color: #8e8e93;
+  /* Same height with or without the Pop Out button, so the Sent and
+     Received headings line up. */
+  min-height: 26px;
 }
 
 .rx-filter-meta {
@@ -869,6 +910,132 @@ button.secondary:hover:not(:disabled) {
   line-height: 1.35;
 }
 
+/* A message row with its controls. × (and ↺ on a hidden search result)
+   shows on hover or keyboard focus, centered on the row's right edge in a
+   gutter the row keeps clear, so it never covers a badge or the text. */
+.msg-row {
+  position: relative;
+}
+
+.msg-row > .msg-item {
+  padding-right: 30px;
+}
+
+.msg-row.has-restore > .msg-item {
+  padding-right: 116px;
+}
+
+/* While selecting, a checkbox sits at the row's left edge. */
+.msg-row.selecting {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.msg-row.selecting > .msg-item {
+  flex: 1;
+  min-width: 0;
+  user-select: none;
+}
+
+.msg-select-box {
+  margin: 0;
+  cursor: pointer;
+}
+
+.msg-row-actions {
+  position: absolute;
+  right: 5px;
+  top: 50%;
+  transform: translateY(-50%);
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+/* The buttons appear on hover or focus; the HIDDEN label always shows. */
+.msg-row-btn {
+  opacity: 0;
+  transition: opacity 0.12s;
+}
+
+.msg-row:hover .msg-row-btn,
+.msg-row-actions:focus-within .msg-row-btn {
+  opacity: 1;
+}
+
+.msg-row-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  padding: 0 0 1px;
+  border-radius: 10px;
+  font-size: 15px;
+  line-height: 1;
+  background: rgba(120, 120, 128, 0.2);
+  color: #3c3c43;
+  border: none;
+}
+
+.msg-clear-btn:hover {
+  background: rgba(255, 59, 48, 0.85);
+  color: #fff;
+}
+
+.msg-restore-btn {
+  font-size: 13px;
+}
+
+.msg-restore-btn:hover {
+  background: rgba(0, 122, 255, 0.85);
+  color: #fff;
+}
+
+.msg-select-count {
+  font-size: 12px;
+  color: #8e8e93;
+  white-space: nowrap;
+}
+
+/* Clear all sits beside a pane title as plain text, not a filled button. */
+.msg-clear-all-btn {
+  height: 22px;
+  padding: 0 6px;
+  font-size: 12px;
+  background: transparent;
+  color: #8e8e93;
+  border: none;
+}
+
+.msg-clear-all-btn:hover {
+  color: #ff3b30;
+}
+
+/* Done (leaving selection) is not destructive, so it does not turn red. */
+.msg-select-count + .msg-clear-all-btn:hover {
+  color: #007aff;
+}
+
+.clear-dialog-option {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+}
+
+.clear-dialog-note {
+  margin: 0;
+  font-size: 12px;
+  color: #6c6c70;
+  line-height: 1.45;
+}
+
+button.danger {
+  background: #ff3b30;
+}
+
 .sent-item {
   background: rgba(111, 62, 160, 0.05);
 }
@@ -897,9 +1064,11 @@ button.secondary:hover:not(:disabled) {
   background: rgba(34, 111, 90, 0.14);
 }
 
+/* Badges are smaller than the line's text, so center them on it; baseline
+   alignment sits them low. */
 .msg-item-top-row {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   gap: 6px;
   flex-wrap: nowrap;
   overflow: hidden;
@@ -979,6 +1148,20 @@ button.secondary:hover:not(:disabled) {
   text-transform: uppercase;
   font-weight: 700;
   white-space: nowrap;
+}
+
+/* A search hit cleared from the list but kept in the database, shown in
+   the row's right-hand controls. */
+.msg-hidden-badge {
+  font-size: 10px;
+  padding: 1px 4px;
+  border-radius: 3px;
+  background: rgba(142, 142, 147, 0.18);
+  color: #8e8e93;
+  font-weight: 700;
+  text-transform: uppercase;
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 
 .msg-badge.queued  { background: #e8f0fa; color: #4a6fa5; }
@@ -1219,6 +1402,25 @@ button.secondary:hover:not(:disabled) {
   min-width: 0;
 }
 
+:root[data-theme="dark"] .app-header h1,
+:root[data-theme="dark"] .header-status {
+  color: #e4e6eb;
+}
+
+:root[data-theme="dark"] .msg-row-btn {
+  background: rgba(142, 142, 147, 0.3);
+  color: #e4e6eb;
+}
+
+:root[data-theme="dark"] .clear-dialog-note {
+  color: #a1a1a6;
+}
+
+:root[data-theme="dark"] .header-clock {
+  color: #a1a1a6;
+}
+
+
 :root[data-theme="dark"] body,
 :root[data-theme="dark"] .app,
 :root[data-theme="dark"] .preferences-window {
@@ -1239,7 +1441,6 @@ button.secondary:hover:not(:disabled) {
   color: #e4e6eb;
 }
 
-:root[data-theme="dark"] .header-centered h1,
 :root[data-theme="dark"] .app-version,
 :root[data-theme="dark"] .msg-pane h2,
 :root[data-theme="dark"] .log-window-title,
@@ -1249,10 +1450,12 @@ button.secondary:hover:not(:disabled) {
   color: #e4e6eb;
 }
 
+:root[data-theme="dark"] a.config-meta {
+  color: #7fb4ff;
+}
+
 :root[data-theme="dark"] .section-title,
 :root[data-theme="dark"] label,
-:root[data-theme="dark"] .web-server-copy,
-:root[data-theme="dark"] .rx-filter-help,
 :root[data-theme="dark"] .inline-toggle,
 :root[data-theme="dark"] .msg-time,
 :root[data-theme="dark"] .log-window-count,
@@ -1261,19 +1464,6 @@ button.secondary:hover:not(:disabled) {
 :root[data-theme="dark"] .log-autoscroll-label,
 :root[data-theme="dark"] .empty {
   color: #aeb4bf;
-}
-:root[data-theme="dark"] .dashboard-kicker,
-:root[data-theme="dark"] .dashboard-kicker {
-  color: #67b2ff;
-}
-
-:root[data-theme="dark"] .dashboard-body {
-  color: #c7ceda;
-}
-
-:root[data-theme="dark"] .dashboard-title,
-:root[data-theme="dark"] .dashboard-status {
-  color: #e4e6eb;
 }
 
 :root[data-theme="dark"] .dashboard-onboarding {
@@ -1305,6 +1495,15 @@ button.secondary:hover:not(:disabled) {
   color: #e4e6eb;
 }
 
+:root[data-theme="dark"] .settings-btn {
+  background: none;
+  color: #aeaeb2;
+}
+
+:root[data-theme="dark"] .settings-btn:hover:not(:disabled) {
+  color: #f6f8ff;
+}
+
 :root[data-theme="dark"] .log-window-btn {
   background: rgba(75, 90, 114, 0.34);
   border-color: rgba(144, 163, 192, 0.5);
@@ -1324,25 +1523,6 @@ button.secondary:hover:not(:disabled) {
   color: #9ba5b8;
 }
 
-:root[data-theme="dark"] .web-server-buttons button.secondary {
-  background: rgba(74, 120, 184, 0.46);
-  border-color: rgba(147, 189, 246, 0.72);
-  color: #f3f9ff;
-}
-
-:root[data-theme="dark"] .web-server-buttons button.secondary:hover:not(:disabled) {
-  background: rgba(99, 147, 214, 0.62);
-  border-color: rgba(180, 213, 255, 0.82);
-  color: #ffffff;
-}
-
-:root[data-theme="dark"] .web-server-buttons button.secondary:disabled {
-  opacity: 1;
-  background: rgba(47, 58, 74, 0.84);
-  border-color: rgba(90, 106, 129, 0.55);
-  color: #9ea8ba;
-}
-
 :root[data-theme="dark"] .rx-filter-btn.active {
   background: rgba(0, 122, 255, 0.25);
   border-color: rgba(76, 156, 255, 0.6);
@@ -1353,10 +1533,6 @@ button.secondary:hover:not(:disabled) {
   background: rgba(255, 193, 7, 0.14);
   border-color: rgba(255, 193, 7, 0.45);
   color: #ffda86;
-}
-
-:root[data-theme="dark"] .web-server-url a {
-  color: #7fb4ff;
 }
 
 :root[data-theme="dark"] .sent-item {
@@ -1391,13 +1567,14 @@ button.secondary:hover:not(:disabled) {
 
 /* ── Responsive ─────────────────────────────────────────────── */
 @media (max-width: 720px) {
-  .dashboard-hero-panel {
-    flex-direction: column;
+
+  form.preferences-window-body {
+    grid-template-columns: 1fr;
   }
 
-  .dashboard-hero-actions {
-    min-width: 0;
-    justify-content: flex-start;
+  form.preferences-window-body > .preferences-panel {
+    grid-area: auto;
+    grid-column: auto;
   }
 
   .two {
@@ -1511,7 +1688,9 @@ button.secondary:hover:not(:disabled) {
   background: rgba(255, 255, 255, 0.92);
   color: #1d1d1f;
   border-radius: 999px;
-  padding: 6px 12px;
+  /* Vertical padding inside the fixed 26px button height pushed the label
+     below center; let the height center it instead. */
+  padding: 0 12px;
   font-size: 12px;
   font-weight: 600;
   cursor: pointer;
@@ -1525,6 +1704,34 @@ button.secondary:hover:not(:disabled) {
   padding: 6px 10px;
   flex-shrink: 0;
   border-bottom: 1px solid rgba(60, 60, 67, 0.1);
+}
+
+.received-window-search-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px 0;
+  flex-shrink: 0;
+}
+
+.received-window-search {
+  flex: 1;
+  min-width: 0;
+}
+
+.received-window-search-note {
+  font-size: 11px;
+  color: #8e8e93;
+  white-space: nowrap;
+}
+
+.received-window-load-older {
+  align-self: center;
+  margin: 8px auto;
+}
+
+:root[data-theme="dark"] .received-window-search-note {
+  color: #aeb4bf;
 }
 
 .received-window-list {
@@ -1857,6 +2064,17 @@ button.secondary:hover:not(:disabled) {
 :root[data-theme="dark"] .received-window-msg-item {
   background: rgba(34, 111, 90, 0.2);
   border-color: rgba(34, 111, 90, 0.35);
+}
+
+/* Sent messages in the pop-out take the main window's Sent pane colors. */
+.received-window-msg-item.sent-item {
+  background: rgba(111, 62, 160, 0.05);
+  border-color: rgba(111, 62, 160, 0.14);
+}
+
+:root[data-theme="dark"] .received-window-msg-item.sent-item {
+  background: rgba(111, 62, 160, 0.18);
+  border-color: rgba(111, 62, 160, 0.35);
 }
 
 :root[data-theme="dark"] .msg-popout-disabled {
