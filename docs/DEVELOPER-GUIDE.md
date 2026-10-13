@@ -9,12 +9,14 @@
 1. [Quick Start](#quick-start)
 2. [Project Architecture](#project-architecture)
 3. [Codebase Map](#codebase-map)
-4. [Key Design Decisions & Patterns](#key-design-decisions--patterns)
-5. [Ponytail Audit - What Was Fixed & Why](#ponytail-audit--what-was-fixed--why)
-6. [Common Pitfalls (Don't Repeat These)](#common-pitfalls-dont-repeat-these)
-7. [Mac App Store Gotchas](#mac-app-store-gotchas)
-8. [Cross-Platform Notes](#cross-platform-notes)
-9. [Build & Release](#build--release)
+4. [Message History Database](#message-history-database)
+5. [Key Design Decisions & Patterns](#key-design-decisions--patterns)
+6. [Ponytail Audit - What Was Fixed & Why](#ponytail-audit---what-was-fixed--why)
+7. [Common Pitfalls (Don't Repeat These)](#common-pitfalls-dont-repeat-these)
+8. [Mac App Store Gotchas](#mac-app-store-gotchas)
+9. [Cross-Platform Notes](#cross-platform-notes)
+10. [Build & Release](#build--release)
+11. [Version History](#version-history)
 
 ---
 
@@ -36,7 +38,9 @@ npm run build
 
 # Tests
 npm run test          # frontend (Vitest)
-cd src-tauri && cargo test    # backend (Rust)
+npm run test:rust     # backend (Rust)
+npm run test:all      # both
+npm run verify        # both, plus tsc and clippy: run before every commit
 cd src-tauri && cargo check   # backend compile check only
 
 # Release (macOS, Linux, Windows)
@@ -65,6 +69,7 @@ APRSWolf is a **Tauri v2 + React (TypeScript)** desktop app - a native app bundl
 │  │  src-tauri/src/aprsis.rs, ax25.rs         │  │
 │  │  src-tauri/src/settings.rs                │  │
 │  │  src-tauri/src/message_store.rs (SQLite)  │  │
+│  │  src-tauri/src/message_export.rs, _import │  │
 │  │  src-tauri/src/webserver.rs               │  │
 │  └──────────────────────────────────────────┘  │
 └─────────────────────────────────────────────────┘
@@ -72,9 +77,9 @@ APRSWolf is a **Tauri v2 + React (TypeScript)** desktop app - a native app bundl
 
 ### Communication Model
 
-- **Frontend → Backend**: Tauri `invoke("command_name", { ...args })` calls. Each command is a `#[tauri::command]` function in `lib.rs` or `runtime.rs`. Payloads are JSON-serialized structs.
+- **Frontend → Backend**: Tauri `invoke("command_name", { ...args })` calls. Each command is a `#[tauri::command]` function in `lib.rs`, `tnc.rs`, `aprsis.rs`, `settings.rs`, `message_store.rs`, or `webserver.rs`; the `generate_handler!` list in `lib.rs` registers them all. Payloads are JSON-serialized structs.
 - **Backend → Frontend**: Tauri events via `app_handle.emit("event_name", payload)`. The frontend subscribes with `listen("event_name", callback)`.
-- **Frontend ↔ Frontend**: Cross-window communication uses a lightweight event bus (`src/logBus.ts`, `src/receivedBus.ts`) - a simple typed subscriber pattern, not Redux/Zustand.
+- **Frontend ↔ Frontend**: Cross-window communication uses two lightweight event buses (`src/logBus.ts`, `src/receivedBus.ts`) built on `BroadcastChannel` - a simple typed subscriber pattern, not Redux/Zustand.
 
 ### The Two Sides Have Different Conventions
 
@@ -91,17 +96,30 @@ APRSWolf is a **Tauri v2 + React (TypeScript)** desktop app - a native app bundl
 
 | File | Purpose | ~LOC | Notes |
 |------|---------|------|-------|
-| `App.tsx` | Main application component - message composer, sent pane, connection controls, settings panel | 1,500 | The god file. Consider splitting if it grows much more. |
-| `ReceivedWindow.tsx` | Popped-out received messages window (filter + reply) | - | Opened from App.tsx's button |
-| `PreferencesWindow.tsx` | macOS-style preferences (settings, theme, sound, beacon, message history) | - | Save uses `buildSettingsPayload()` |
-| `HelpWindow.tsx` | In-app help browser with sidebar navigation & search | - | Content in `helpContent.ts` |
-| `LogWindow.tsx` | Traffic log panel | - | Uses `useTheme()` (one-shot) |
-| `ClearDialog.tsx` | Hide/delete confirmation dialog with the `Delete from database` box | - | Shared by both windows |
-| `HeaderClock.tsx` | UTC + local time in the header row | - | Redraws each minute |
-| `MessageRowActions.tsx` | Per-row `×` clear and `↺` unhide controls | - | Hover and selection states |
-| `MessageSelection.tsx` | Long-press multi-select UI for message lists | - | Checkbox per row |
-| `UnreadDot.tsx` | Red unread count badge on the `To Me` filter | - | Driven by `useToMeUnread()` |
-| `main.tsx` | React entry point, window creation | - | Thin wrapper |
+| `App.tsx` | Main window - send row, Sent and Received panes, filter chips, search, bottom bar with connection controls | 1,600 | The god file. Consider splitting if it grows much more. |
+| `ReceivedWindow.tsx` | Messages window (Pop Out): sent and received in one timeline, with search, paging, and reply | 670 | Reloads on `history_imported` |
+| `PreferencesWindow.tsx` | Preferences (station, TNC, APRS-IS, beacon, message history, remote) | 540 | Save uses `buildSettingsPayload()` |
+| `ExportWindow.tsx` | File > Export Messages window (direction, new-only, dates, callsigns, short-lived) | 290 | `buildExportFilter()` and `exportFileName()` are unit-tested |
+| `AboutWindow.tsx` | About APRSWolf window (version, links, credits) | 120 | Replaces the native About panel |
+| `HelpWindow.tsx` | In-app help browser with sidebar navigation & search | 130 | Content in `helpContent.ts`, mirrored in `docs/IN-APP-HELP.md` |
+| `LogWindow.tsx` | Traffic log panel | 340 | Uses `useTheme()` (one-shot) |
+| `ClearDialog.tsx`, `MessageRowActions.tsx`, `MessageSelection.tsx` | Clearing messages: the × button, long-press selection, and the hide-or-delete dialog | - | Shared by the main and Messages windows |
+| `HeaderClock.tsx`, `UnreadDot.tsx` | UTC and local clock; unread To Me indicator | - | |
+| `main.tsx` | React entry point; picks the window component from the URL hash | - | See the route table below |
+
+Each extra window is a Tauri webview on the same bundle, told apart by its hash. Help, Preferences, Export, and About open from Rust (`open_*_window` in `lib.rs`); Traffic Log and the Messages window open from `App.tsx` with `WebviewWindow`.
+
+| Hash | Component | Opened by |
+|------|-----------|-----------|
+| (none) | `App` | App launch |
+| `#help` | `HelpWindow` | Help > APRSWolf Help, the About window's Help link |
+| `#log` | `LogWindow` | Traffic Log ↗ |
+| `#preferences` | `PreferencesWindow` | APRSWolf > Preferences..., the gear |
+| `#received` | `ReceivedWindow` | Pop Out ↗ |
+| `#export` | `ExportWindow` | File > Export Messages... |
+| `#about` | `AboutWindow` | APRSWolf > About APRSWolf |
+
+A new window also needs its label in `src-tauri/capabilities/default.json`, or its `invoke` calls are refused.
 
 ### Frontend Libraries (`src/lib/`)
 
@@ -110,11 +128,9 @@ APRSWolf is a **Tauri v2 + React (TypeScript)** desktop app - a native app bundl
 | `types.ts` | Shared type definitions and constants | **Single source of truth** for `AppSettingsPayload`, `ThemeMode`, `ReceivedFilter`, `FILTER_OPTIONS`. Imported by multiple windows - never duplicate these types. |
 | `helpers.ts` | Utility functions | `buildSettingsPayload()`, `deriveAprsIsPasscode()`, input normalisers, `nextId()`, message helpers |
 | `useTheme.ts` | Shared theme hook | Two modes: **reactive** (pass `themeMode` prop) or **one-shot** (loads from backend). Includes `prefers-color-scheme` listener. |
-| `messageHistory.ts` | Message history types and helpers | Row shapes, paging, and search glue shared by both windows |
-| `appBadge.ts` | App icon unread badge | macOS/Linux dock badge via Tauri; Windows red-dot taskbar overlay |
-| `useSelection.ts` | Long-press multi-select state | Backs `MessageSelection.tsx` |
-| `useToMeUnread.ts` | Unread `To Me` count | Feeds `UnreadDot.tsx` and the app icon badge |
-| `useWindowFocused.ts` | Window focus tracking | Clears the unread count when a window gains focus |
+| `messageHistory.ts` | Paging, search, and merge helpers for message lists | `olderPageCursor()` returns the `(beforeTime, beforeSeq)` cursor for the next page; `useMessageSearch()` drives the search fields; `mergeTimeline()` builds the Messages window's single list; `dedupeByUuid()` merges live and stored items |
+| `useSelection.ts` | Long-press multi-select for clearing messages | Escape leaves selection |
+| `appBadge.ts`, `useToMeUnread.ts`, `useWindowFocused.ts` | Unread To Me count on the filter chip and app icon | Counts only while no APRSWolf window has focus; macOS/Linux dock badge via Tauri, Windows red-dot taskbar overlay |
 
 **Why these libraries exist:** The Ponytail audit found `AppSettingsPayload` defined identically in 3 files, and the same settings payload constructed inline in 3 different places. Extracting them eliminated drift and cut ~50 lines of duplicated code.
 
@@ -125,22 +141,23 @@ APRSWolf is a **Tauri v2 + React (TypeScript)** desktop app - a native app bundl
 | `logBus.ts` | Typed pub/sub for log/message events between components |
 | `receivedBus.ts` | Typed pub/sub for received message events |
 
-These are *window-local* buses, not cross-window. Cross-window state is managed through Tauri events (Rust backend broadcasts to all windows).
+Both buses use `BroadcastChannel`, so a publish in one window reaches every APRSWolf window. Connection state and stored history still come from the Rust backend through Tauri events (for example `history_imported` after an import), since the backend owns them.
 
 ### Backend (`src-tauri/src/`)
 
 | File | Purpose | ~LOC |
 |------|---------|------|
-| `main.rs` | Tauri app entry point | Small |
-| `lib.rs` | Command handlers + `tauri::Builder` setup | Medium |
-| `runtime.rs` | Application state (`RuntimeState`), shared runtime data | ~300 |
+| `lib.rs` | `tauri::Builder` setup, menus, window openers, import command | 330 |
+| `runtime.rs` | Application state (`RuntimeState`), shared runtime data | 170 |
 | `tnc.rs` | KISS TNC connection management | - |
 | `agw.rs` | AGW TCP protocol handler | - |
 | `kiss.rs` | KISS framing encode/decode | - |
 | `aprsis.rs` | APRS-IS connection over TCP | - |
 | `ax25.rs` | AX.25 frame parsing and construction | - |
 | `settings.rs` | Settings load/save (JSON file in app data dir) | - |
-| `message_store.rs` | Message history store (SQLite `messages.db`): UUIDs, retention, full-text search, hide/delete, legacy import | - |
+| `message_store.rs` | SQLite message history: schema and migrations, storing, paging, search, clearing, export, import | 1,500 |
+| `message_export.rs` | CSV writer and export filters | 280 |
+| `message_import.rs` | CSV reader and row validation for import | 470 |
 | `webserver.rs` | Embedded web server for remote control interface | - |
 | `main.rs` | `fn main()` - starts the Tauri app | 5 lines |
 
@@ -153,6 +170,35 @@ The remote web control is **not a React app** - it's a standalone HTML file serv
 | `src-tauri/remote-control.html` | Phone-friendly dashboard for remote monitoring | ~400 LOC |
 
 This was extracted from a 1,600-line inline string inside `webserver.rs` - it used to be embedded as a Rust string literal. Extracting it made the HTML editable without recompiling Rust, and let us trim 75% of dead code.
+
+## Message History Database
+
+`message_store.rs` keeps sent and received messages in SQLite (`messages.db` in the app data folder, opened in WAL mode). Every function that touches it goes through `with_store()`, which opens the database on first use and imports the pre-database `received_messages.json` once.
+
+| Table | Holds |
+|-------|-------|
+| `received` | Every stored received packet, with `uuid`, `timestamp` (message time), `stored_at` (when it entered this database), `keep` (conversation is kept forever, everything else is trimmed by the retention setting), and `hidden` |
+| `sent` | Sent messages with their delivery status, `created_at` (message time), `stored_at`, and `hidden` |
+| `received_fts`, `sent_fts` | FTS5 indexes for search, kept current by triggers |
+| `meta` | Key-value pairs; holds the last new-only export mark |
+
+The schema version lives in `PRAGMA user_version`. `migrate()` runs each step whose version is above the database's, in its own transaction with its version bump:
+
+| Version | Step |
+|---------|------|
+| 1 | `received`, its prune index, and `received_fts` |
+| 2 | `sent` |
+| 3 | `hidden` on both tables, `sent_fts` |
+| 4 | `sent.stored_at`, `meta` |
+| 5 | Time indexes `received(timestamp, seq)` and `sent(created_at, seq)` |
+
+A schema change is a new `SCHEMA_*` constant appended to the step list in `migrate()`, plus a test that migrates a database from the previous version.
+
+Lists are ordered by message time, not by insertion, so an imported message sits where its time puts it. Paging uses a `(timestamp, seq)` cursor: the frontend's `olderPageCursor()` sends `beforeTime` and `beforeSeq`, and the query returns rows strictly before that pair. Rows per page are `PAGE_SIZE` (200) on both sides.
+
+A packet heard twice within 30 seconds is stored once. The fingerprints live in memory (`RecentPackets`), since the window is shorter than any restart; clearing messages resets them so a later copy of a cleared packet isn't matched to its old row.
+
+Export (`message_export.rs`) writes RFC 4180 CSV: UTF-8 with a BOM, CRLF line endings, every field quoted, and a leading apostrophe on text a spreadsheet would run as a formula. Import (`message_import.rs`) parses and validates the whole file before `message_store::import()` stores anything in one transaction, skipping rows whose `uuid`, or whose direction, sender, addressee, text, and time, are already stored. It then emits `history_imported` so every window reloads.
 
 ## Key Design Decisions & Patterns
 
@@ -206,12 +252,14 @@ Use `useTheme()` from `src/lib/useTheme.ts` instead of inline `useEffect` for th
 **Two modes:**
 
 ```typescript
-// One-shot (loads from backend on mount) - for secondary windows
+// One-shot (loads from backend on mount) - Help, Traffic Log, Messages
 useTheme();
 
-// Reactive (prop-driven, re-applies on change) - for preferences window
+// Reactive (prop-driven, re-applies on change)
 useTheme(themeMode);
 ```
+
+Preferences, Export, and About don't use the hook yet: each loads the setting and applies `data-theme` in its own effect. Moving them onto `useTheme()` is open cleanup.
 
 The hook handles:
 - Applying `data-theme` attribute to `<html>`
@@ -252,7 +300,7 @@ Use `nextId()` from `helpers.ts` for any ID that needs to be unique within a ses
 
 ### 7. APRS-IS Passcode Derivation
 
-Built into `helpers.ts` as `deriveAprsIsPasscode(callsign)` - this is the standard APRS-IS passcode algorithm. It's duplicated on the Rust side too; keep both in sync if the algorithm changes (unlikely - it's a published standard).
+Built into `helpers.ts` as `deriveAprsIsPasscode(callsign)` - this is the standard APRS-IS passcode algorithm. The Rust side takes the passcode as given and doesn't derive it.
 
 ### 8. Message History Store (SQLite)
 
@@ -261,7 +309,7 @@ Message history lives in `src-tauri/src/message_store.rs`, backed by `messages.d
 Key rules:
 
 - **Stable UUIDs.** Every message gets a UUID assigned once and kept for its lifetime. The frontend keys rows by that UUID, not by a session counter. Sent messages sent this session keep the backend queue number in its own field for delivery updates, but their row id is a window id like every other row.
-- **Schema migrations by `user_version`.** The schema is at version 3 (v1: received table; v2: sent table; v3: full-text index on sent messages + `hidden` flag on both tables). Bump `user_version` and migrate in the store when you add a column or table.
+- **Schema migrations by `user_version`.** The schema is at version 5; [Message History Database](#message-history-database) lists each step. Bump `user_version` and migrate in the store when you add a column or table.
 - **Retention.** Messages, queries, and bulletins are kept until deleted. Positions, weather, telemetry, status, objects, items, Mic-E, and acks are trimmed after 7 days by default (Preferences > Message History: 1/7/30 days or keep everything). The trim runs at most once an hour while packets arrive.
 - **Duplicate suppression.** A packet heard twice within 30 seconds (RF + APRS-IS, or two digipeaters) is fingerprinted on sender, addressee, body, and message number and stored once. The duplicate's event carries the first copy's UUID and sequence with `duplicate` set, so the lists skip it and the Traffic Log tags it `(duplicate)`.
 - **Hide vs. delete.** The `hidden` flag keeps a cleared message in the database so search still finds it (marked `HIDDEN`); a real delete removes the row. Lists and the web remote leave hidden rows out, and a new multipart piece never joins a hidden row.
@@ -353,7 +401,7 @@ This audit was run on 2026-06-17 by the Ponytail plugin. The findings below are 
 
 - **Code signing is mandatory.** The macOS DMG build produces an unsigned bundle. You need an Apple Developer ID certificate and must run `codesign` on the `.app` before packaging.
 - **Notarization required.** After signing, submit to Apple for notarization before distribution.
-- **Sandbox entitlements.** The Mac App Store requires sandboxing. APRSWolf's TNC access (network connections to Dire Wolf) and file I/O (settings persistence) will need explicit entitlements. Map these carefully - the networking entitlements for TNC TCP access must allow arbitrary TCP connections to localhost devices.
+- **Sandbox entitlements.** The Mac App Store requires sandboxing. APRSWolf's TNC access (network connections to the TNC) and file I/O (settings persistence) will need explicit entitlements. Map these carefully - the networking entitlements for TNC TCP access must allow arbitrary TCP connections to localhost devices.
 - **Tauri v2 + Mac App Store** has known quirks. Test the sandboxed build thoroughly before submission. Key areas: file access (settings), network access (TNC, APRS-IS), and webview behavior under sandbox.
 
 ## Cross-Platform Notes
@@ -373,14 +421,14 @@ platform-specific behavior to keep in mind.
 
 - **No built-in webview on most distros.** Tauri uses WebKitGTK. Users may need to install it: `sudo apt install libwebkit2gtk-4.1-dev`.
 - **No App Store distribution.** Packages are `.deb`, `.rpm`, and `.AppImage`.
-- **Dire Wolf is native on Linux** - TNC mode works best here.
+- **Dire Wolf runs natively on Linux**, so a software TNC can share the machine with APRSWolf.
 - **Test on both X11 and Wayland.** Tauri v2 handles Wayland, but window positioning and sizes can differ.
 - **Build baseline:** Ubuntu 22.04 is used in CI to keep the glibc floor low.
 
 ### General Cross-Platform
 
 - **The frontend (React/TypeScript)** is the portable part. All business logic for display, formatting, and UI lives here and works identically on all platforms.
-- **The backend (Rust/Tauri)** handles platform-specific I/O (TNC connections, file storage, system tray). Platform-specific code is isolated in `src-tauri/src/` - only `main.rs` and `lib.rs` need platform-conditional compilation.
+- **The backend (Rust/Tauri)** handles platform-specific I/O (TNC connections, file storage, system tray). Platform-specific code is isolated in `src-tauri/src/`; `runtime.rs` holds the `cfg(target_os = "macos")` code.
 - **`remote-control.html`** works on any platform with a browser - it's served by the embedded web server and is fully platform-agnostic.
 
 ## Build & Release
@@ -438,5 +486,5 @@ DMGs.
 
 ---
 
-*Last updated: 2026-10-12 - v1.1.0 message history, search, clearing, and main-window rework integrated.*
+*Last updated: 2026-10-12 - v1.1.0 message history, search, clearing, and main-window rework integrated; message export and import and the About window added after.*
 *Next reader: you. This doc is your insurance against repeating the same bugs twice.*

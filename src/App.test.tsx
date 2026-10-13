@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import App from "./App";
 import { formatHeaderClock } from "./HeaderClock";
 import HelpWindow from "./HelpWindow";
@@ -165,7 +165,7 @@ describe("App", () => {
   it("renders initial disconnected state and disabled send", async () => {
     render(<App />);
 
-    expect(await screen.findByRole("heading", { name: "TNC (Dire Wolf)" })).toHaveAttribute(
+    expect(await screen.findByRole("heading", { name: "TNC" })).toHaveAttribute(
       "title",
       expect.stringMatching(/mutually exclusive/i),
     );
@@ -194,7 +194,7 @@ describe("App", () => {
 
   it("recovers from a stale pop-out state key left by a crash", async () => {
     // A leftover key from a crashed session must NOT disable the embedded
-    // pane for the whole new session — startup clears it as crash residue.
+    // pane for the whole new session - startup clears it as crash residue.
     window.localStorage.setItem("aprswolf-received-window-open", "1");
 
     render(<App />);
@@ -227,7 +227,7 @@ describe("App", () => {
 
   it("invokes connect_tnc when Connect is clicked", async () => {
     render(<App />);
-    await screen.findByRole("heading", { name: "TNC (Dire Wolf)" });
+    await screen.findByRole("heading", { name: "TNC" });
     fireEvent.click(screen.getByRole("button", { name: "Connect TNC" }));
 
     expect(invokeMock).toHaveBeenCalledWith("connect_tnc", {
@@ -246,7 +246,7 @@ describe("App", () => {
     const statusHandler = statusCall[1] as (event: unknown) => void;
     statusHandler({ payload: { state: "tx_connecting", detail: "172.16.2.201:8001" } });
 
-    const tncHeading = screen.getByRole("heading", { name: "TNC (Dire Wolf)" });
+    const tncHeading = screen.getByRole("heading", { name: "TNC" });
     const tncSection = tncHeading.closest(".config-group") as HTMLElement;
 
     await waitFor(() => {
@@ -281,7 +281,7 @@ describe("App", () => {
     });
 
     render(<App />);
-    await screen.findByRole("heading", { name: "TNC (Dire Wolf)" });
+    await screen.findByRole("heading", { name: "TNC" });
 
     const statusCall = listenMock.mock.calls.find((call: any) => call[0] === "tnc_status");
     if (statusCall?.[1]) {
@@ -1107,7 +1107,7 @@ describe("App", () => {
 
     render(<App />);
 
-    const tncHeadings = await screen.findAllByRole("heading", { name: "TNC (Dire Wolf)" });
+    const tncHeadings = await screen.findAllByRole("heading", { name: "TNC" });
     const tncHeading = tncHeadings[tncHeadings.length - 1];
     const tncSection = tncHeading?.closest(".config-group");
     expect(tncSection).toBeTruthy();
@@ -1209,8 +1209,54 @@ describe("App", () => {
     fireEvent.click(screen.getByRole("button", { name: "Load older messages" }));
 
     expect(await screen.findByText("From last week")).toBeInTheDocument();
-    expect(invokeMock).toHaveBeenCalledWith("load_received_messages", { beforeSeq: 801 });
+    expect(invokeMock).toHaveBeenCalledWith("load_received_messages", {
+      beforeTime: newestPage[199].timestamp,
+      beforeSeq: 801,
+    });
     expect(screen.queryByRole("button", { name: "Load older messages" })).not.toBeInTheDocument();
+  });
+
+  it("starts paging over in the Messages window after an import", async () => {
+    const newestPage = Array.from({ length: 200 }, (_, i) => ({
+      uuid: `u-${1000 - i}`,
+      seq: 1000 - i,
+      timestamp: Date.now() - i * 1000,
+      from: "W1AW",
+      to: "WT1W-15",
+      body: `Page one note ${1000 - i}`,
+      aprsType: "msg",
+    }));
+    const handlers: Record<string, () => void> = {};
+    listenMock.mockImplementation((event: string, handler: () => void) => {
+      handlers[event] = handler;
+      return Promise.resolve(() => {});
+    });
+    invokeMock.mockImplementation((cmd: string, payload?: { beforeSeq?: number }) => {
+      if (cmd === "load_settings") {
+        return Promise.resolve({ source: "WT1W-15", show_ack_messages: false, theme_mode: "system" });
+      }
+      if (cmd === "load_received_messages") {
+        if (payload?.beforeSeq === 801) {
+          return Promise.resolve([
+            { uuid: "u-5", seq: 5, timestamp: Date.now() - 86_400_000 * 3, from: "W1AW", to: "WT1W-15", body: "From last week", aprsType: "msg" },
+          ]);
+        }
+        return Promise.resolve(newestPage);
+      }
+      return Promise.resolve(undefined);
+    });
+
+    render(<ReceivedWindow />);
+    expect(await screen.findByText("Page one note 1000")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Load older messages" }));
+    expect(await screen.findByText("From last week")).toBeInTheDocument();
+
+    // An import can add messages inside the pages already shown, so the
+    // window drops them and offers to load older pages again.
+    await waitFor(() => expect(handlers.history_imported).toBeDefined());
+    act(() => handlers.history_imported());
+    await waitFor(() => expect(screen.queryByText("From last week")).not.toBeInTheDocument());
+    expect(await screen.findByRole("button", { name: "Load older messages" })).toBeInTheDocument();
   });
 
   it("lists sent and received together in the pop-out Messages window", async () => {

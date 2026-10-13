@@ -1,13 +1,12 @@
 import { useEffect } from "react";
-
-export type ThemeMode = "system" | "light" | "dark";
+import type { ThemeMode } from "./types";
 
 /**
  * Apply the theme to `document.documentElement` via `data-theme` attribute.
  *
  * Two modes:
- * 1. **Reactive** — pass a `themeMode` prop; re-applies on change (PreferencesWindow).
- * 2. **One-shot** — omit `themeMode`; loads from backend `load_settings` on mount
+ * 1. **Reactive** - pass a `themeMode` prop; re-applies on change (PreferencesWindow).
+ * 2. **One-shot** - omit `themeMode`; loads from backend `load_settings` on mount
  *    (HelpWindow, LogWindow, ReceivedWindow).
  *
  * In both modes, when the resolved mode is `"system"`, a `change` listener on the

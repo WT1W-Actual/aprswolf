@@ -32,6 +32,14 @@ function HelpWindow() {
 
   const activeSection = filteredSections.find((section) => section.id === selectedId) ?? filteredSections[0] ?? HELP_SECTIONS[0];
 
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape" && !event.defaultPrevented) void closeWindow();
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, []);
+
   async function closeWindow() {
     try {
       const { getCurrentWindow } = await import("@tauri-apps/api/window");
