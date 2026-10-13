@@ -20,6 +20,8 @@ Use the end-user guide for:
 - first-time setup
 - connecting with TNC or APRS-IS
 - sending and receiving messages
+- message history, search, and clearing
+- the unread count and the Messages window
 - theme and sound settings
 - remote web control
 - troubleshooting

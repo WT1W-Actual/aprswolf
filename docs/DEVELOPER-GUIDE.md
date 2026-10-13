@@ -64,6 +64,7 @@ APRSWolf is a **Tauri v2 + React (TypeScript)** desktop app - a native app bundl
 │  │  src-tauri/src/tnc.rs, agw.rs, kiss.rs    │  │
 │  │  src-tauri/src/aprsis.rs, ax25.rs         │  │
 │  │  src-tauri/src/settings.rs                │  │
+│  │  src-tauri/src/message_store.rs (SQLite)  │  │
 │  │  src-tauri/src/webserver.rs               │  │
 │  └──────────────────────────────────────────┘  │
 └─────────────────────────────────────────────────┘
@@ -92,9 +93,14 @@ APRSWolf is a **Tauri v2 + React (TypeScript)** desktop app - a native app bundl
 |------|---------|------|-------|
 | `App.tsx` | Main application component - message composer, sent pane, connection controls, settings panel | 1,500 | The god file. Consider splitting if it grows much more. |
 | `ReceivedWindow.tsx` | Popped-out received messages window (filter + reply) | - | Opened from App.tsx's button |
-| `PreferencesWindow.tsx` | macOS-style preferences (settings, theme, sound, beacon) | - | Save uses `buildSettingsPayload()` |
+| `PreferencesWindow.tsx` | macOS-style preferences (settings, theme, sound, beacon, message history) | - | Save uses `buildSettingsPayload()` |
 | `HelpWindow.tsx` | In-app help browser with sidebar navigation & search | - | Content in `helpContent.ts` |
 | `LogWindow.tsx` | Traffic log panel | - | Uses `useTheme()` (one-shot) |
+| `ClearDialog.tsx` | Hide/delete confirmation dialog with the `Delete from database` box | - | Shared by both windows |
+| `HeaderClock.tsx` | UTC + local time in the header row | - | Redraws each minute |
+| `MessageRowActions.tsx` | Per-row `×` clear and `↺` unhide controls | - | Hover and selection states |
+| `MessageSelection.tsx` | Long-press multi-select UI for message lists | - | Checkbox per row |
+| `UnreadDot.tsx` | Red unread count badge on the `To Me` filter | - | Driven by `useToMeUnread()` |
 | `main.tsx` | React entry point, window creation | - | Thin wrapper |
 
 ### Frontend Libraries (`src/lib/`)
@@ -104,6 +110,11 @@ APRSWolf is a **Tauri v2 + React (TypeScript)** desktop app - a native app bundl
 | `types.ts` | Shared type definitions and constants | **Single source of truth** for `AppSettingsPayload`, `ThemeMode`, `ReceivedFilter`, `FILTER_OPTIONS`. Imported by multiple windows - never duplicate these types. |
 | `helpers.ts` | Utility functions | `buildSettingsPayload()`, `deriveAprsIsPasscode()`, input normalisers, `nextId()`, message helpers |
 | `useTheme.ts` | Shared theme hook | Two modes: **reactive** (pass `themeMode` prop) or **one-shot** (loads from backend). Includes `prefers-color-scheme` listener. |
+| `messageHistory.ts` | Message history types and helpers | Row shapes, paging, and search glue shared by both windows |
+| `appBadge.ts` | App icon unread badge | macOS/Linux dock badge via Tauri; Windows red-dot taskbar overlay |
+| `useSelection.ts` | Long-press multi-select state | Backs `MessageSelection.tsx` |
+| `useToMeUnread.ts` | Unread `To Me` count | Feeds `UnreadDot.tsx` and the app icon badge |
+| `useWindowFocused.ts` | Window focus tracking | Clears the unread count when a window gains focus |
 
 **Why these libraries exist:** The Ponytail audit found `AppSettingsPayload` defined identically in 3 files, and the same settings payload constructed inline in 3 different places. Extracting them eliminated drift and cut ~50 lines of duplicated code.
 
@@ -129,6 +140,7 @@ These are *window-local* buses, not cross-window. Cross-window state is managed 
 | `aprsis.rs` | APRS-IS connection over TCP | - |
 | `ax25.rs` | AX.25 frame parsing and construction | - |
 | `settings.rs` | Settings load/save (JSON file in app data dir) | - |
+| `message_store.rs` | Message history store (SQLite `messages.db`): UUIDs, retention, full-text search, hide/delete, legacy import | - |
 | `webserver.rs` | Embedded web server for remote control interface | - |
 | `main.rs` | `fn main()` - starts the Tauri app | 5 lines |
 
@@ -241,6 +253,21 @@ Use `nextId()` from `helpers.ts` for any ID that needs to be unique within a ses
 ### 7. APRS-IS Passcode Derivation
 
 Built into `helpers.ts` as `deriveAprsIsPasscode(callsign)` - this is the standard APRS-IS passcode algorithm. It's duplicated on the Rust side too; keep both in sync if the algorithm changes (unlikely - it's a published standard).
+
+### 8. Message History Store (SQLite)
+
+Message history lives in `src-tauri/src/message_store.rs`, backed by `messages.db` in the app data folder. The **backend is the only writer**: the TNC and APRS-IS receive paths store each packet, and the send path records each sent message and its delivery status. The frontend reads pages and runs searches through commands; it never writes the database directly.
+
+Key rules:
+
+- **Stable UUIDs.** Every message gets a UUID assigned once and kept for its lifetime. The frontend keys rows by that UUID, not by a session counter. Sent messages sent this session keep the backend queue number in its own field for delivery updates, but their row id is a window id like every other row.
+- **Schema migrations by `user_version`.** The schema is at version 3 (v1: received table; v2: sent table; v3: full-text index on sent messages + `hidden` flag on both tables). Bump `user_version` and migrate in the store when you add a column or table.
+- **Retention.** Messages, queries, and bulletins are kept until deleted. Positions, weather, telemetry, status, objects, items, Mic-E, and acks are trimmed after 7 days by default (Preferences > Message History: 1/7/30 days or keep everything). The trim runs at most once an hour while packets arrive.
+- **Duplicate suppression.** A packet heard twice within 30 seconds (RF + APRS-IS, or two digipeaters) is fingerprinted on sender, addressee, body, and message number and stored once. The duplicate's event carries the first copy's UUID and sequence with `duplicate` set, so the lists skip it and the Traffic Log tags it `(duplicate)`.
+- **Hide vs. delete.** The `hidden` flag keeps a cleared message in the database so search still finds it (marked `HIDDEN`); a real delete removes the row. Lists and the web remote leave hidden rows out, and a new multipart piece never joins a hidden row.
+- **Legacy import.** On first launch the old `received_messages.json` is imported once and renamed `received_messages.json.migrated`.
+
+**Don't re-introduce:** Don't write to `messages.db` from the frontend, and don't key message rows by a session counter. Both were the source of the stale-duplicate bug fixed in v1.1.0.
 
 ## Ponytail Audit - What Was Fixed & Why
 
@@ -366,7 +393,7 @@ See the [project README](../README.md) for quick-start commands. Full release pr
 # 2. Write release notes (copy RELEASE-NOTES-TEMPLATE.md → docs/releases/X.Y.Z.md)
 #    and add the new version to docs/releases/README.md
 # 3. Commit, then push a version tag:
-git tag v1.0.4 && git push origin v1.0.4
+git tag v1.1.0 && git push origin v1.1.0
 # 4. The `release` GitHub Actions workflow builds all platforms and
 #    attaches every artifact to a single GitHub Release.
 ```
@@ -401,6 +428,7 @@ DMGs.
 
 | Version | Date | Key Changes |
 |---------|------|-------------|
+| 1.1.0 | 2026-10-12 | Message history in SQLite (`message_store.rs`), full-text search, hide/delete/select, unread `To Me` + app icon badge, reworked main window (send bar on top, compact status bar, header clock), unified Messages pop-out. |
 | 1.0.4 | 2026-10-12 | Release filenames use the full `major.minor.patch` version; the in-app badge shows the full version. |
 | 1.0.3 | 2026-10-12 | Fix "damaged" error on Apple Silicon: `tauri.conf.json` sets `bundle.macOS.signingIdentity` to `-` so the whole app is ad-hoc signed with sealed resources. |
 | 1.0.2 | 2026-10-12 | Preferences now provide working standard connection defaults; Open Remote UI launches the system browser. |
@@ -410,5 +438,5 @@ DMGs.
 
 ---
 
-*Last updated: 2026-10-12 - v1.0.2 release changes integrated.*
+*Last updated: 2026-10-12 - v1.1.0 message history, search, clearing, and main-window rework integrated.*
 *Next reader: you. This doc is your insurance against repeating the same bugs twice.*
