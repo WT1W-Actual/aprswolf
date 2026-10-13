@@ -1160,11 +1160,11 @@ async fn process_agw_frame(
             if let Some((_src, dst, path, info)) = parse_tnc2_protocol_view(tnc2_line) {
                 use crate::ax25::ParsedAddress;
                 let path_addrs: Vec<ParsedAddress> = path.iter()
-                    .filter_map(|p| {
+                    .map(|p| {
                         let parts: Vec<&str> = p.splitn(2, '-').collect();
                         let callsign = parts[0].to_string();
                         let ssid: u8 = parts.get(1).and_then(|s| s.parse().ok()).unwrap_or(0);
-                        Some(ParsedAddress { callsign, ssid, repeated: false })
+                        ParsedAddress { callsign, ssid, repeated: false }
                     })
                     .collect();
                 let parsed = ParsedUiFrame {
