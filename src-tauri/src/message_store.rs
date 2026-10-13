@@ -740,6 +740,10 @@ fn last_export(conn: &Connection) -> rusqlite::Result<Option<i64>> {
 /// Write the messages `filter` selects to `out`. A new-only export with no
 /// other filter moves the mark to `now`, so the next one starts where this
 /// one stopped; a narrower one leaves the mark alone.
+///
+/// Test-only: `export_messages` splits these two steps so the mark moves
+/// only after the file is safely on disk.
+#[cfg(test)]
 fn export(
     conn: &Connection,
     out: &mut impl std::io::Write,
