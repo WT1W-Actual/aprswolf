@@ -404,6 +404,8 @@ What you can do from this page:
 
 On a phone the Sent and Received panes stack.
 
+![APRSWolf Remote Web Control on a phone](images/aprswolf-remote-phone.png)
+
 ## Where To Look For Help
 
 - In-app Help window: fastest reference while APRSWolf is open
