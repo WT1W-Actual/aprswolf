@@ -104,17 +104,14 @@ fn unguard(value: &str) -> &str {
     }
 }
 
-/// An APRS station or addressee: letters and digits, up to nine characters
-/// with an optional SSID after a dash.
+/// An APRS station, addressee, or path hop as the app stores it: up to nine
+/// visible ASCII characters. Addressees such as NWS-TSTM don't follow
+/// callsign rules, and a packet with no source is stored as `?`, so only the
+/// characters that separate fields in a packet header are refused.
 fn valid_callsign(call: &str) -> bool {
-    let (base, ssid) = match call.split_once('-') {
-        Some((base, ssid)) => (base, Some(ssid)),
-        None => (call, None),
-    };
-    !base.is_empty()
-        && base.len() <= 9
-        && base.chars().all(|c| c.is_ascii_alphanumeric())
-        && ssid.is_none_or(|s| !s.is_empty() && s.len() <= 2 && s.chars().all(|c| c.is_ascii_alphanumeric()))
+    !call.is_empty()
+        && call.len() <= 9
+        && call.chars().all(|c| c.is_ascii_graphic() && !matches!(c, ':' | ',' | '>' | '*'))
 }
 
 fn days_from_civil(year: i64, month: i64, day: i64) -> i64 {
@@ -172,14 +169,22 @@ pub fn parse_timestamp(value: &str) -> Option<i64> {
     } else {
         (rest, 0)
     };
+    // Digits only: `parse` alone would take a sign, so `T-1:30` became 23:30
+    // the day before.
+    let digits = |s: &str| -> Option<i64> {
+        if s.is_empty() || !s.bytes().all(|b| b.is_ascii_digit()) {
+            return None;
+        }
+        s.parse().ok()
+    };
     let mut fields = clock.split(':');
-    let hour: i64 = fields.next()?.parse().ok()?;
-    let minute: i64 = fields.next()?.parse().ok()?;
+    let hour = digits(fields.next()?)?;
+    let minute = digits(fields.next()?)?;
     let (second, millis) = match fields.next() {
         Some(sec) => {
             let (whole, frac) = sec.split_once('.').unwrap_or((sec, ""));
-            let millis = format!("{frac:0<3}").get(..3)?.parse::<i64>().ok()?;
-            (whole.parse::<i64>().ok()?, millis)
+            let millis = if frac.is_empty() { 0 } else { digits(format!("{frac:0<3}").get(..3)?)? };
+            (digits(whole)?, millis)
         }
         None => (0, 0),
     };
@@ -235,7 +240,7 @@ pub fn parse_csv(text: &str, now: i64) -> Result<Vec<ImportRow>, String> {
             columns
                 .get(name)
                 .and_then(|&i| record.get(i))
-                .map(|v| unguard(v.trim_end_matches(['\r', '\n'])).to_string())
+                .map(|v| unguard(v).to_string())
                 .unwrap_or_default()
         };
         match validate_row(&get, earliest, latest) {
@@ -457,9 +462,37 @@ mod tests {
         assert!(valid_callsign("AD6DM-15"));
         assert!(valid_callsign("BLN1"));
         assert!(valid_callsign("WIDE1-1"));
-        assert!(!valid_callsign("AD6DM-"));
         assert!(!valid_callsign("TOOLONGCALL"));
         assert!(!valid_callsign("A B"));
+        assert!(!valid_callsign("A:B"));
         assert!(!valid_callsign(""));
+    }
+
+    #[test]
+    fn every_address_the_app_stores_imports_back() {
+        // NWS-TSTM is the addressee on thunderstorm alerts; `?` is what the
+        // store writes for a packet with no source.
+        let csv = format!(
+            "{HEADER}\"\",\"2026-10-12T18:00:00Z\",\"received\",\"NWS\",\"NWS-TSTM\",\"Severe thunderstorm warning\",\"msg\",\"\",\"\",\"\",\"\"\r\n\
+             \"\",\"2026-10-12T18:01:00Z\",\"received\",\"?\",\"AD6DM-15\",\"x\",\"msg\",\"\",\"\",\"\",\"\"\r\n"
+        );
+        let rows = parse_csv(&csv, NOW).unwrap();
+        assert_eq!(rows[0].to, "NWS-TSTM");
+        assert_eq!(rows[1].from, "?");
+    }
+
+    #[test]
+    fn signed_clock_fields_are_refused() {
+        for bad in ["2026-10-12T-1:30Z", "2026-10-12T10:-5Z", "2026-10-12T10:05:-1Z", "2026-10-12T+1:30Z"] {
+            assert_eq!(parse_timestamp(bad), None, "{bad}");
+        }
+    }
+
+    #[test]
+    fn a_body_that_ends_in_a_line_break_keeps_it() {
+        let csv = format!(
+            "{HEADER}\"\",\"2026-10-12T18:00:00Z\",\"received\",\"N6TEST-7\",\"AD6DM-15\",\"two lines\r\n\",\"msg\",\"\",\"\",\"\",\"\"\r\n"
+        );
+        assert_eq!(parse_csv(&csv, NOW).unwrap()[0].body, "two lines\r\n");
     }
 }

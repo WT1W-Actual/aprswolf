@@ -357,7 +357,7 @@ fn record(conn: &Connection, message: &Value, now: i64) -> rusqlite::Result<(Str
     let latest = conn
         .query_row(
             "SELECT seq, uuid, timestamp, from_call, to_call, body, data FROM received WHERE hidden = 0
-             ORDER BY seq DESC LIMIT 1",
+             ORDER BY timestamp DESC, seq DESC LIMIT 1",
             [],
             |row| {
                 Ok(LatestRow {
@@ -746,9 +746,23 @@ fn export(
     filter: &crate::message_export::ExportFilter,
     now: i64,
 ) -> Result<usize, String> {
+    let count = render_export(conn, out, filter, now)?;
+    mark_exported(conn, filter, now)?;
+    Ok(count)
+}
+
+fn render_export(
+    conn: &Connection,
+    out: &mut impl std::io::Write,
+    filter: &crate::message_export::ExportFilter,
+    now: i64,
+) -> Result<usize, String> {
     let since = last_export(conn).map_err(|err| err.to_string())?;
-    let count = crate::message_export::write_csv(conn, out, filter, since, now)
-        .map_err(|err| format!("export failed: {err}"))?;
+    crate::message_export::write_csv(conn, out, filter, since, now).map_err(|err| format!("export failed: {err}"))
+}
+
+/// Move the new-only mark to `now`, for an export that wasn't narrowed.
+fn mark_exported(conn: &Connection, filter: &crate::message_export::ExportFilter, now: i64) -> Result<(), String> {
     if filter.new_only && !filter.narrows() {
         conn.execute(
             "INSERT INTO meta (key, value) VALUES (?1, ?2)
@@ -757,7 +771,7 @@ fn export(
         )
         .map_err(|err| err.to_string())?;
     }
-    Ok(count)
+    Ok(())
 }
 
 /// Write the messages `filter` selects to a CSV file at `path`; returns how
@@ -768,11 +782,27 @@ pub fn export_messages(
     path: String,
     filter: crate::message_export::ExportFilter,
 ) -> Result<usize, String> {
-    with_store(&app, |store| {
-        let file = std::fs::File::create(&path).map_err(|err| format!("could not create {path}: {err}"))?;
-        let mut out = std::io::BufWriter::new(file);
-        export(&store.conn, &mut out, &filter, now_ms())
-    })
+    // Build the whole file in memory, then write it beside the target and
+    // rename it into place, so a failed query or write never leaves an empty
+    // or cut-off file where the user asked for one. The new-only mark moves
+    // only once the file is in place.
+    let now = now_ms();
+    let mut out = Vec::new();
+    let count = with_store(&app, |store| render_export(&store.conn, &mut out, &filter, now))?;
+    write_replacing(std::path::Path::new(&path), &out).map_err(|err| format!("could not write {path}: {err}"))?;
+    with_store(&app, |store| mark_exported(&store.conn, &filter, now))?;
+    Ok(count)
+}
+
+fn write_replacing(path: &std::path::Path, bytes: &[u8]) -> std::io::Result<()> {
+    let mut tmp_name = path.file_name().unwrap_or_default().to_os_string();
+    tmp_name.push(".part");
+    let tmp = path.with_file_name(tmp_name);
+    let result = std::fs::write(&tmp, bytes).and_then(|()| std::fs::rename(&tmp, path));
+    if result.is_err() {
+        let _ = std::fs::remove_file(&tmp);
+    }
+    result
 }
 
 /// When the last new-only export ran, in milliseconds, if one has.
@@ -1258,6 +1288,38 @@ mod tests {
         let stored = page(&conn, None, 10).unwrap();
         assert_eq!(stored.len(), 1);
         assert_eq!(stored[0]["body"], "meet at the club, bring the radio");
+    }
+
+    #[test]
+    fn a_multipart_piece_after_an_import_joins_the_newest_message() {
+        let conn = memory_db();
+        let now = 1_791_830_400_000;
+        let (live_uuid, _) = record(&conn, &message("W1AW", Some("AD6DM"), "meet at the club,", "msg"), now).unwrap();
+        // An older message imported afterwards gets the highest seq.
+        let csv = "direction,from,to,body,timestamp\nreceived,W1AW,AD6DM,an old note,2026-10-01 18:00:00\n";
+        let rows = crate::message_import::parse_csv(csv, now).unwrap();
+        assert_eq!(import(&conn, &rows, now + 1_000).unwrap().added, 1);
+        let (second_uuid, _) = record(&conn, &message("W1AW", Some("AD6DM"), "bring the radio", "msg"), now + 5_000).unwrap();
+        assert_eq!(second_uuid, live_uuid);
+        let stored = page(&conn, None, 10).unwrap();
+        assert_eq!(stored.len(), 2);
+        assert_eq!(stored[0]["body"], "meet at the club, bring the radio");
+    }
+
+    #[test]
+    fn a_failed_export_write_leaves_nothing_behind() {
+        let dir = std::env::temp_dir().join(format!("aprswolf-export-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir(&dir).unwrap();
+        let target = dir.join("out.csv");
+        std::fs::write(&target, "old").unwrap();
+        write_replacing(&target, b"new").unwrap();
+        assert_eq!(std::fs::read_to_string(&target).unwrap(), "new");
+        assert!(!dir.join("out.csv.part").exists());
+
+        let missing = dir.join("no-such-folder").join("out.csv");
+        assert!(write_replacing(&missing, b"new").is_err());
+        assert!(!missing.exists());
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]

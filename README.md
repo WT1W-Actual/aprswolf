@@ -184,7 +184,7 @@ Each opens a dialog with a **Delete from database** box, unchecked by default. L
 With nothing changed, the file holds sent messages and received messages, queries, and bulletins, oldest first, hidden ones included. The window can narrow it:
 
 - **Sent and received**, **Received only**, or **Sent only**.
-- **Only messages new since the last new-only export.** New means added to this computer's history since then, so messages imported from elsewhere still count. The first new-only export takes everything, and a second one straight after it is empty. Only a new-only export with no other filter moves the mark, so messages a narrower one left out still reach the next.
+- **Only messages new since the last new-only export.** New means added to this computer's history since then, so messages imported from elsewhere still count. The first new-only export takes everything, and a second one straight after it is empty. Only a new-only export with no other filter moves the mark, so messages a narrower one left out still reach the next. Each message goes out as it stood then; a later ack or the rest of a multipart message doesn't send it again.
 - **Limit to a date range**, From and To in local time, both days included.
 - **Callsigns**, matched against sender or addressee. A callsign without an SSID matches all of its SSIDs.
 - **Include positions, weather, and other short-lived packets**, off by default. Turning it on warns that those packets are removed after the retention period (7 days by default), so only the ones still stored are exported.
