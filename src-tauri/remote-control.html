@@ -296,10 +296,25 @@
       if (el && document.activeElement !== el) el.value = v ?? "";
     }
 
-    function setFeedback(msg, warn) {
+    // The feedback line shows an action's result, a refresh error, or the
+    // "connect first" hint. A refresh error clears on the next good refresh,
+    // and the hint never covers a message.
+    let feedbackKind = "";
+    let beaconReady = false;
+    function setFeedback(msg, warn, kind = "action") {
       const el = $("feedback");
       el.textContent = msg || "";
       el.className = "hint" + (warn ? " warn" : "");
+      feedbackKind = msg ? kind : "";
+    }
+
+    function setHint(text) {
+      if (feedbackKind && feedbackKind !== "hint") return;
+      setFeedback(text, false, "hint");
+    }
+
+    function connectHint(s) {
+      return s.runtime.tnc_connected || s.runtime.aprsis_connected ? "" : "Connect TNC or APRS-IS to enable message sending.";
     }
 
     // Same algorithm as deriveAprsIsPasscode() in src/lib/helpers.ts.
@@ -338,15 +353,20 @@
       return d.toDateString() === new Date().toDateString() ? time : `${d.toLocaleDateString()}, ${time}`;
     }
 
-    function baseCall(call) { return String(call || "").toUpperCase().replace(/-.*$/, ""); }
-
-    function isToMe(item, source) {
-      const to = String(item.to || "").toUpperCase();
-      return Boolean(source) && to === String(source).toUpperCase();
+    // Same rules as matchesStationAddress() in src/lib/helpers.ts.
+    function isToMe(item, source, allowBase) {
+      const myCall = String(source || "").trim().toUpperCase();
+      if (!myCall) return false;
+      const myBase = myCall.split("-")[0];
+      const to = String(item.to || "").trim().toUpperCase();
+      if (to) return to === myCall || (allowBase && to.split("-")[0] === myBase);
+      const body = String(item.body || "").toUpperCase();
+      const named = (call) => new RegExp(`(?<![A-Z0-9])${call.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![A-Z0-9])`).test(body);
+      return named(myCall) || (allowBase && named(myBase));
     }
 
-    // Acks and rejects stay hidden unless Show ACKs is on, as on the desktop.
-    function isAck(item) { return /^(ack|rej)[A-Za-z0-9}]{1,6}$/i.test(String(item.body || "").trim()); }
+    // Same test as isAckMessageBody() in src/lib/helpers.ts.
+    function isAck(item) { return /^ack[A-Za-z0-9]{1,5}$/i.test(String(item.body || "").trim()); }
 
     function receivedList(s) {
       const all = Array.isArray(s.received) ? s.received : [];
@@ -355,7 +375,7 @@
 
     function matchesFilter(item, source) {
       switch (receivedFilter) {
-        case "tome": return isToMe(item, source);
+        case "tome": return isToMe(item, source, Boolean(lastState?.settings?.promiscuous_base_callsign));
         case "messages": return item.aprsType === "msg";
         case "bulletins": return Boolean(item.isBulletin);
         default: return true;
@@ -427,12 +447,20 @@
       $("aprsisMeta").textContent = s.settings.aprsis_host ? `${s.settings.aprsis_host}:${s.settings.aprsis_port}` : "not set";
       $("remoteMeta").textContent = `port ${s.web_server.port}`;
 
-      $("connectTncBtn").disabled = tnc || aprsis;
+      // Enabled under the same rules as the desktop's bottom bar (App.tsx),
+      // read from the saved settings.
+      const set = (v) => Boolean(String(v ?? "").trim());
+      const st = s.settings;
+      const tncConfigured = set(st.source) && set(st.host) && set(st.port);
+      const aprsisConfigured = set(st.source) && set(st.aprsis_host) && set(st.aprsis_port) && set(st.aprsis_passcode);
+      beaconReady = (tnc || aprsis) && set(st.beacon_lat) && set(st.beacon_lon) && set(st.beacon_symbol);
+      $("connectTncBtn").disabled = !tncConfigured || tnc || aprsis;
       $("disconnectTncBtn").disabled = !tnc;
-      $("connectAprsIsBtn").disabled = tnc || aprsis;
+      $("connectAprsIsBtn").disabled = !aprsisConfigured || tnc || aprsis;
       $("disconnectAprsIsBtn").disabled = !aprsis;
+      $("sendBeaconBtn").disabled = !beaconReady || Boolean(beaconCooldownTimer);
       $("sendMessageBtn").disabled = !(tnc || aprsis);
-      if (!(tnc || aprsis) && !$("feedback").textContent) setFeedback("Connect TNC or APRS-IS to enable message sending.");
+      setHint(connectHint(s));
 
       const received = receivedList(s);
       renderChips(received, source);
@@ -444,17 +472,30 @@
       }
     }
 
+    // One request at a time: a refresh asked for while one is in flight runs
+    // right after it, so a slow reply can never draw over a newer one.
     let lastJson = "";
+    let refreshing = false;
+    let refreshAgain = false;
+    let stopped = false;
     async function refresh() {
+      if (stopped) return;
+      if (refreshing) { refreshAgain = true; return; }
+      refreshing = true;
       try {
         const state = await api("GET", "/api/state");
+        if (stopped) return;
         const json = JSON.stringify(state);
         lastState = state;
+        if (feedbackKind === "refresh") { setFeedback(""); setHint(connectHint(state)); }
         // Re-rendering an unchanged list every poll would reset taps in progress.
         if (json !== lastJson) render(state);
         lastJson = json;
       } catch (e) {
-        setFeedback(e.message || String(e), true);
+        if (!stopped) setFeedback(e.message || String(e), true, "refresh");
+      } finally {
+        refreshing = false;
+        if (refreshAgain) { refreshAgain = false; refresh(); }
       }
     }
 
@@ -468,7 +509,7 @@
           clearInterval(beaconCooldownTimer);
           beaconCooldownTimer = null;
           $("beaconCooldown").textContent = "";
-          $("sendBeaconBtn").disabled = false;
+          $("sendBeaconBtn").disabled = !beaconReady;
           return;
         }
         $("beaconCooldown").textContent = `${Math.floor(left / 60)}:${String(left % 60).padStart(2, "0")}`;
@@ -547,6 +588,10 @@
     $("disableRemoteBtn").addEventListener("click", async () => {
       try {
         await api("POST", "/api/disable");
+        stopped = true;
+        clearInterval(clockTimer);
+        clearInterval(refreshTimer);
+        if (beaconCooldownTimer) clearInterval(beaconCooldownTimer);
         document.body.innerHTML = '<section class="panel" style="margin-top:40px;text-align:center"><h1 style="font-size:15px">Remote Disabled</h1><p class="hint">Re-enable from the APRSWolf desktop app.</p></section>';
       } catch (e) { setFeedback(e.message, true); }
     });
@@ -580,15 +625,19 @@
     });
 
     $("remoteToken").value = getToken();
+    // Wait for a pause in typing, so a half-typed token doesn't fire a
+    // refused request per keystroke.
+    let tokenTimer = null;
     $("remoteToken").addEventListener("input", () => {
       try { localStorage.setItem("aprswolf_remote_token", $("remoteToken").value.trim()); } catch {}
-      refresh();
+      clearTimeout(tokenTimer);
+      tokenTimer = setTimeout(refresh, 500);
     });
 
     tickClock();
-    setInterval(tickClock, 1000);
+    const clockTimer = setInterval(tickClock, 1000);
     refresh();
-    setInterval(refresh, 3000);
+    const refreshTimer = setInterval(refresh, 3000);
   </script>
 </body>
 </html>
