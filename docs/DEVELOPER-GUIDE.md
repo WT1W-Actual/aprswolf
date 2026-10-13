@@ -441,7 +441,7 @@ See the [project README](../README.md) for quick-start commands. Full release pr
 # 2. Write release notes (copy RELEASE-NOTES-TEMPLATE.md → docs/releases/X.Y.Z.md)
 #    and add the new version to docs/releases/README.md
 # 3. Commit, then push a version tag:
-git tag v1.1.0 && git push origin v1.1.0
+git tag v1.1.1 && git push origin v1.1.1
 # 4. The `release` GitHub Actions workflow builds all platforms and
 #    attaches every artifact to a single GitHub Release.
 ```
@@ -476,6 +476,7 @@ DMGs.
 
 | Version | Date | Key Changes |
 |---------|------|-------------|
+| 1.1.1 | 2026-10-13 | Message export/import (`message_export.rs`, `message_import.rs`), About window (`AboutWindow.tsx`), remote page rebuilt to match the desktop main window, lists ordered by message time, schema v4/v5. |
 | 1.1.0 | 2026-10-12 | Message history in SQLite (`message_store.rs`), full-text search, hide/delete/select, unread `To Me` + app icon badge, reworked main window (send bar on top, compact status bar, header clock), unified Messages pop-out. |
 | 1.0.4 | 2026-10-12 | Release filenames use the full `major.minor.patch` version; the in-app badge shows the full version. |
 | 1.0.3 | 2026-10-12 | Fix "damaged" error on Apple Silicon: `tauri.conf.json` sets `bundle.macOS.signingIdentity` to `-` so the whole app is ad-hoc signed with sealed resources. |
@@ -486,5 +487,5 @@ DMGs.
 
 ---
 
-*Last updated: 2026-10-12 - v1.1.0 message history, search, clearing, and main-window rework integrated; message export and import and the About window added after.*
+*Last updated: 2026-10-13 - v1.1.1 message export and import, the About window, and the rebuilt remote page integrated; remote screenshots refreshed and the last clippy warning cleared.*
 *Next reader: you. This doc is your insurance against repeating the same bugs twice.*
