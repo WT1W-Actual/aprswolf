@@ -41,6 +41,8 @@ Use the Preferences window for first-run setup and saved defaults.
 
 Open Preferences from the APRSWolf menu or with the gear at the top right of the main window; Escape closes it. This is where a new user should enter the static setup the app reuses later.
 
+On first launch, personal values such as your callsign, APRS-IS passcode, beacon coordinates, and Remote Token are blank. Standard connection values are prefilled with working defaults; review them, enter your own values, and click `Save`.
+
 What belongs in Preferences:
 
 - Station callsign and RF digi path.
@@ -121,6 +123,7 @@ How message addressing, queuing, and replies work.
 
 - `Message To` is the APRS addressee, not the AX.25 destination field.
 - The app queues outbound messages and tracks ACK delivery automatically.
+- The first send counts as attempt one. Unacknowledged messages are retried after 15 seconds, 30 seconds, 1 minute, and 2 minutes; after the fifth attempt they expire if no ACK arrives during the final 4-minute wait.
 - Click any received message to open a pre-filled reply dialog.
 - `Send Reply` uses your current transport and the saved digi path if you are on RF.
 
@@ -133,7 +136,7 @@ Use filters, search, the Messages window, and the traffic log to manage APRS tra
 - A red count on `To Me`, and on the app icon, shows messages addressed to you that arrived while APRSWolf was in the background. You can turn the app icon count off in Preferences.
 - `Promiscuous Base-Call` is a main-window toggle that also treats messages for your base callsign as yours.
 - The search field in the Sent Messages header searches sent and received messages across the whole history and filters both panes.
-- Right-click an expired sent message and choose `Resend` to queue it again under its original message number. It's refused while another message to that station still holds the number, or when your callsign has changed since it was sent.
+- Right-click an expired sent message and choose `Resend` to queue it again under its original message number. It's refused while another message to that station still holds the number, or when your configured callsign differs from the one that sent it.
 - `Pop Out` opens the Messages window: sent and received in one timeline, with its own search and reply behavior.
 - A packet heard twice, over RF and APRS-IS or through two digipeaters, is listed once.
 - Multipart stitching is applied for near-sequential fragments from the same station.
@@ -153,12 +156,14 @@ Traffic Log: use Traffic Log when you need a full scrolling history of TX, RX, d
 
 Drive the app from a browser while the desktop window stays visible but locked.
 
-1. Choose a Web Port in the Remote Web Control section.
+1. Set the Web Port and optional Remote Token in Preferences. The token is blank by default, which restricts remote access to this computer.
 2. Click `Enable Remote`.
 3. Open the shown local URL in a browser or use `Open Remote UI`, which launches your system browser in the desktop app.
 4. Disable Remote from the desktop app when you want to restore desktop controls.
 
 Desktop lock: while remote control is enabled, desktop controls remain visible but are intentionally locked to avoid conflicting commands between the desktop and browser session.
+
+Remote Settings: edits stay in place while live traffic refreshes the page. Click `Save` to persist and sync them; if you edit a field again while a save is in progress, that newer edit remains unsaved.
 
 ### Help Window
 

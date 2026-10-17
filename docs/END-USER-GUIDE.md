@@ -43,7 +43,7 @@ Recommended for most users:
 
 1. Install APRSWolf for your platform (see [Installing APRSWolf](#installing-aprswolf)).
 2. Open `Preferences` with the gear (⚙︎) at the top right of the main window, or from the app menu (macOS: `APRSWolf > Preferences`; Windows/Linux: the Preferences item in the app menu).
-3. Enter your callsign and save at least one connection path.
+3. Enter your callsign and save at least one connection path. Your callsign, passcode, beacon coordinates, and remote token start blank; standard connection values are prefilled with working defaults.
 4. Choose one connection mode from the main window:
 	- `Connect TNC` for RF use through your TNC
 	- `Connect APRS-IS` for internet APRS use
@@ -90,6 +90,8 @@ The macOS and Windows builds are not code-signed yet, so the first launch needs 
 ## First-Time Setup
 
 Use `Preferences` for all saved setup. The main window is intended for live connections, sending, receiving, and traffic review.
+
+On first launch, enter your own callsign before connecting. Personal values such as the callsign, APRS-IS passcode, beacon coordinates, and Remote Token are blank. Standard connection values are prefilled: RF path `WIDE1-1,WIDE2-1`, TNC `127.0.0.1:8001`, APRS-IS `rotate.aprs2.net:14580`, beacon symbol `/-`, and remote web port `18420`. Change any value that does not fit your station, then click `Save`.
 
 ### Station Settings
 
@@ -177,6 +179,12 @@ Notes:
 - `Message To` is the APRS addressee, not the AX.25 destination.
 - The AX.25 destination is always `APRS` internally.
 - The app automatically manages APRS message numbering and ACK tracking.
+
+### Delivery, Retries, And Resend
+
+The first send counts as attempt one. APRSWolf retries an unacknowledged message after 15 seconds, 30 seconds, 1 minute, and 2 minutes; after the fifth attempt it waits 4 minutes before marking the message `Expired` if no ACK arrives. A message still waiting for an ACK when APRSWolf closes is marked expired at the next launch because background retries stop with the app.
+
+To try an expired message again, right-click it under Sent Messages and choose `Resend`. Resend uses the original message number, and is unavailable while another message to that station still holds the number or if your configured callsign is different from the one that sent it.
 
 ## Receiving Messages
 
@@ -304,7 +312,7 @@ Theme options:
 - `Light`: always use the light theme
 - `Dark`: always use the dark theme
 
-The selected theme is saved automatically.
+Click `Save` in Preferences to save the selected theme with your other settings.
 
 ## Beacon Button
 
@@ -433,6 +441,8 @@ Typical use:
 4. Use `Disable Remote` when finished.
 
 The remote token is empty by default, which restricts the server to this computer. Set a token before connecting from another device on your network. The `Enable remote on launch` preference is off by default.
+
+The remote page's Settings section edits the saved station and connection values. Incoming traffic refreshes the page, but does not overwrite fields you have edited; click `Save` to persist the changes. Fields changed again while a save is in progress remain unsaved until you save them again.
 
 ## Everyday Use Tips
 

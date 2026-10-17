@@ -24,7 +24,9 @@ Leave the radio in the shack and run it from the couch: set a Remote
 Token in Preferences, click **Enable Remote** in the main window, and
 open the address it shows (port 18420 by default) from your phone on
 the local network. **Open Remote UI** opens the same page in your
-system browser.
+system browser. Settings you edit in the remote page stay in place while
+live traffic refreshes; click **Save** to persist them and sync them back
+to the desktop app.
 
 ## Download
 
@@ -66,6 +68,9 @@ needs one extra click:
 
 You'll need an amateur radio callsign. Open Preferences with the gear
 (⚙︎) at the top right of the main window, enter your callsign, and save.
+Personal values such as your callsign, passcode, beacon coordinates, and
+remote token start blank. Standard connection values are prefilled with
+working defaults and can be changed in Preferences.
 Then pick one way onto the network from the bar along the bottom of the
 main window. Only one can be connected at a time.
 

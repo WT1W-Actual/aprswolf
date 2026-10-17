@@ -276,8 +276,8 @@ The remote web control (`remote-control.html`) is a **standalone HTML file**, no
 **Rules for editing it:**
 - It's served raw - no bundler, no TypeScript, no JSX. Write plain ES6+ JS and CSS.
 - It talks to the Rust backend via `fetch()` calls to `http://localhost:{port}/api/...`
-- Keep it thin - it's a monitoring dashboard, not a full APRS client.
-- If it needs significant new functionality, consider a separate React build pipeline for it (but that's a lot of complexity for what should remain a simple dashboard).
+- It is the remote control surface, not just a monitoring dashboard: it supports transport controls, messaging, beacons, queue actions, and saved settings.
+- The settings snapshot runs alongside live traffic refreshes. Keep edited fields in `dirtyFields` until Save succeeds, and only clear a field if its current value still matches the value sent by that save; otherwise a newer edit made during the request would be lost.
 
 ### 5. Console Logging
 
@@ -314,7 +314,7 @@ Key rules:
 - **Duplicate suppression.** A packet heard twice within 30 seconds (RF + APRS-IS, or two digipeaters) is fingerprinted on sender, addressee, body, and message number and stored once. The duplicate's event carries the first copy's UUID and sequence with `duplicate` set, so the lists skip it and the Traffic Log tags it `(duplicate)`.
 - **Hide vs. delete.** The `hidden` flag keeps a cleared message in the database so search still finds it (marked `HIDDEN`); a real delete removes the row. Lists and the web remote leave hidden rows out, and a new multipart piece never joins a hidden row.
 - **Import updates.** An imported message the store already holds updates the stored copy only when the file's copy is further along: a later sent status (acked, then expired or failed, then sent, then queued) or a received body that continues the stored one. Everything else is skipped, so importing a file twice changes nothing.
-- **Retries and message numbers.** The retry loop in `tnc.rs` sends Queued, Sent, and Failed messages again on the `retry_delay_ms` backoff and expires them after `MAX_ATTEMPTS`. Message numbers come from the queue counter, which starts over at every launch, so `send_message` skips a number that another message to the same station still holds. `resend_message` keeps the original number and refuses while it's held, or when the configured callsign differs from the one the message was sent as.
+- **Retries and message numbers.** The first send counts as attempt one. The retry loop in `tnc.rs` retries after 15, 30, 60, and 120 seconds; after the fifth send, it waits 240 seconds before expiring the message. Message numbers come from the queue counter, which starts over at every launch, so `send_message` skips a number that another message to the same station still holds. `resend_message` keeps the original number and refuses while it's held, or when the configured callsign differs from the one the message was sent as.
 - **Legacy import.** On first launch the old `received_messages.json` is imported once and renamed `received_messages.json.migrated`.
 
 **Don't re-introduce:** Don't write to `messages.db` from the frontend, and don't key message rows by a session counter. Both were the source of the stale-duplicate bug fixed in v1.1.0.
