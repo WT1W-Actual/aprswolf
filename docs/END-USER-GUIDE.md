@@ -18,15 +18,15 @@ Grab the latest version from the
 
 | Your computer | Download this |
 |---|---|
-| Mac, Intel | `APRSWolf_1.1.1_x64.dmg` |
-| Mac, Apple Silicon (M1/M2/M3/M4) | `APRSWolf_1.1.1_aarch64.dmg` |
-| Windows | `APRSWolf_1.1.1_x64-setup.exe` (or the `.msi`) |
-| Linux, Debian or Ubuntu (Intel/AMD 64-bit) | `APRSWolf_1.1.1_amd64.deb` |
-| Linux, Debian or Ubuntu (ARM64, e.g. Raspberry Pi OS 64-bit) | `APRSWolf_1.1.1_arm64.deb` |
-| Linux, Fedora or openSUSE (Intel/AMD 64-bit) | `APRSWolf-1.1.1-1.amd64.rpm` |
-| Linux, Fedora or openSUSE (ARM64) | `APRSWolf-1.1.1-1.arm64.rpm` |
-| Linux, any distro (Intel/AMD 64-bit) | `APRSWolf_1.1.1_amd64.AppImage` |
-| Linux, any distro (ARM64) | `APRSWolf_1.1.1_arm64.AppImage` |
+| Mac, Intel | `APRSWolf_1.1.2_x64.dmg` |
+| Mac, Apple Silicon (M1/M2/M3/M4) | `APRSWolf_1.1.2_aarch64.dmg` |
+| Windows | `APRSWolf_1.1.2_x64-setup.exe` (or the `.msi`) |
+| Linux, Debian or Ubuntu (Intel/AMD 64-bit) | `APRSWolf_1.1.2_amd64.deb` |
+| Linux, Debian or Ubuntu (ARM64, e.g. Raspberry Pi OS 64-bit) | `APRSWolf_1.1.2_arm64.deb` |
+| Linux, Fedora or openSUSE (Intel/AMD 64-bit) | `APRSWolf-1.1.2-1.amd64.rpm` |
+| Linux, Fedora or openSUSE (ARM64) | `APRSWolf-1.1.2-1.arm64.rpm` |
+| Linux, any distro (Intel/AMD 64-bit) | `APRSWolf_1.1.2_amd64.AppImage` |
+| Linux, any distro (ARM64) | `APRSWolf_1.1.2_arm64.AppImage` |
 
 **Which ARM build do I need?** The `aarch64` DMG is for **Apple Silicon Macs**
 (M1 and later). The `arm64` Linux packages are for **ARM64 Linux**, such as a
@@ -56,9 +56,9 @@ Recommended for most users:
 
 Primary downloads by platform:
 
-- macOS: `APRSWolf_1.1.1_x64.dmg` (Intel) or `APRSWolf_1.1.1_aarch64.dmg` (Apple Silicon)
-- Windows: `APRSWolf_1.1.1_x64-setup.exe` (or `APRSWolf_1.1.1_x64.msi`)
-- Linux: `APRSWolf_1.1.1_amd64.deb`, `APRSWolf-1.1.1-1.amd64.rpm`, or `APRSWolf_1.1.1_amd64.AppImage`
+- macOS: `APRSWolf_1.1.2_x64.dmg` (Intel) or `APRSWolf_1.1.2_aarch64.dmg` (Apple Silicon)
+- Windows: `APRSWolf_1.1.2_x64-setup.exe` (or `APRSWolf_1.1.2_x64.msi`)
+- Linux: `APRSWolf_1.1.2_amd64.deb`, `APRSWolf-1.1.2-1.amd64.rpm`, or `APRSWolf_1.1.2_amd64.AppImage`
 
 On Linux, use the `arm64` packages on ARM64 hardware such as a 64-bit Raspberry Pi. On macOS, use `aarch64` for Apple Silicon and `x64` for Intel.
 
@@ -81,9 +81,9 @@ On Linux, use the `arm64` packages on ARM64 hardware such as a 64-bit Raspberry 
 
 ### Linux
 
-- Debian/Ubuntu: install the `.deb` with `sudo apt install ./APRSWolf_1.1.1_amd64.deb`.
-- Fedora/openSUSE: install the `.rpm` with `sudo dnf install ./APRSWolf-1.1.1-1.amd64.rpm` (or `zypper install`).
-- Any distro (AppImage): make it executable first (`chmod +x APRSWolf_1.1.1_amd64.AppImage`), then run it.
+- Debian/Ubuntu: install the `.deb` with `sudo apt install ./APRSWolf_1.1.2_amd64.deb`.
+- Fedora/openSUSE: install the `.rpm` with `sudo dnf install ./APRSWolf-1.1.2-1.amd64.rpm` (or `zypper install`).
+- Any distro (AppImage): make it executable first (`chmod +x APRSWolf_1.1.2_amd64.AppImage`), then run it.
 
 The macOS and Windows builds are not code-signed yet, so the first launch needs the extra click described above.
 
