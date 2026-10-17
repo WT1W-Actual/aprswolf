@@ -1,6 +1,7 @@
-import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { FormEvent, MouseEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import { Menu } from "@tauri-apps/api/menu";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import "./App.css";
 import aprsWolfLogo from "./assets/APRSWolf.png";
@@ -467,6 +468,30 @@ function App() {
     askClear({ sent: targets, received: [] }, clearWhat(targets.length, "sent"), sentSelection);
   }
 
+  // Right-click on an expired sent message offers Resend; other rows keep
+  // the webview's own menu.
+  function openSentMenu(event: MouseEvent, item: SentItem) {
+    const uuid = item.uuid;
+    if (item.status !== "expired" || !uuid) return;
+    event.preventDefault();
+    void (async () => {
+      const menu = await Menu.new({
+        items: [{ id: "resend", text: "Resend", action: () => void resendSent(uuid, item.destination) }],
+      });
+      await menu.popup();
+    })();
+  }
+
+  async function resendSent(uuid: string, destination: string) {
+    try {
+      await invoke("resend_message", { uuid });
+      pushLog("status", `resending message to ${destination}`);
+      sentSearch.update((prev) => prev.map((item) => (item.uuid === uuid ? { ...item, status: "queued" } : item)));
+    } catch (error) {
+      pushLog("error", `resend failed: ${String(error)}`);
+    }
+  }
+
   function askClearReceived(item: ReceivedItem) {
     const targets = targetsFor(item, filteredReceived, receivedSelection);
     askClear({ sent: [], received: targets }, clearWhat(targets.length, "received"), receivedSelection);
@@ -751,7 +776,11 @@ function App() {
         if (active && Array.isArray(sent)) {
           setSentItems((prev) => {
             const live = new Map(prev.filter((item) => item.uuid).map((item) => [item.uuid, item]));
-            return sent.map((item) => live.get(item.uuid) ?? { ...item, id: nextId() });
+            return sent.map((item) => {
+              const held = live.get(item.uuid);
+              if (held && (held.status === "queued" || held.status === "sent" || held.status === "failed")) return held;
+              return { ...item, id: held?.id ?? nextId() };
+            });
           });
         }
       } catch {/* keep the current list */}
@@ -1342,6 +1371,8 @@ function App() {
                   onClick={() => {
                     if (item.uuid) sentSelection.handleClick(item.uuid);
                   }}
+                  onContextMenu={(event) => openSentMenu(event, item)}
+                  title={item.status === "expired" ? "Right-click to resend" : undefined}
                 >
                   <div className="msg-item-top-row">
                     <span className="msg-time">{formatReceivedTime(item.timestamp)}</span>

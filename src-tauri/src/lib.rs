@@ -81,13 +81,14 @@ fn import_messages(app: &AppHandle) {
     fn store(app: &AppHandle, rows: &[message_import::ImportRow]) {
         match message_store::import_rows(app, rows) {
             Ok(summary) => {
-                let _ = app.emit("history_imported", summary.added);
+                let _ = app.emit("history_imported", summary.added + summary.updated);
                 let plural = |n: usize| if n == 1 { "" } else { "s" };
-                let text = match (summary.added, summary.skipped) {
-                    (0, skipped) => format!(
+                let mut text = match (summary.added, summary.skipped) {
+                    (0, skipped) if summary.updated == 0 => format!(
                         "Nothing new to import: {} already in your history.",
                         if skipped == 1 { "the message is".to_string() } else { format!("all {skipped} messages are") }
                     ),
+                    (0, _) => String::new(),
                     (added, 0) => format!("Imported {added} message{}.", plural(added)),
                     (added, skipped) => format!(
                         "Imported {added} message{}. {skipped} {} already in your history and {} skipped.",
@@ -96,6 +97,14 @@ fn import_messages(app: &AppHandle) {
                         if skipped == 1 { "was" } else { "were" }
                     ),
                 };
+                if summary.updated > 0 {
+                    let updated = summary.updated;
+                    let line = format!(
+                        "Updated {updated} message{} already in your history with a later status or a fuller multipart text.",
+                        plural(updated)
+                    );
+                    text = if text.is_empty() { line } else { format!("{text} {line}") };
+                }
                 report(app, MessageDialogKind::Info, text);
             }
             Err(err) => report(app, MessageDialogKind::Error, err),
@@ -260,6 +269,10 @@ pub fn run() {
                 .separator()
                 .services()
                 .separator()
+                .hide_with_text("Hide APRSWolf")
+                .hide_others()
+                .show_all()
+                .separator()
                 .quit()
                 .build()?;
 
@@ -309,6 +322,7 @@ pub fn run() {
             tnc::connect_tnc,
             tnc::disconnect_tnc,
             tnc::send_message,
+            tnc::resend_message,
             tnc::clear_queue,
             tnc::inspect_queue,
             tnc::get_manual_beacon_cooldown_remaining,

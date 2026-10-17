@@ -167,6 +167,10 @@
       .config-bar { grid-template-columns: 1fr 1fr; }
       .settings-grid { grid-template-columns: 1fr 1fr; }
     }
+    /* iOS Safari zooms the page when a focused field's text is under 16px. */
+    @media (max-width: 760px), (pointer: coarse) {
+      input, select { font-size: 16px; }
+    }
     @media (max-width: 420px) {
       .send-row { grid-template-columns: 1fr auto; }
       .send-row .send-message { grid-column: 1 / -1; grid-row: 2; }
@@ -291,9 +295,15 @@
         .join("");
     }
 
+    // Settings fields edited since the last save. A snapshot leaves them
+    // alone until Save, so new traffic can't overwrite an unsaved edit.
+    const SETTINGS_FIELDS = ["source", "path", "beaconLat", "beaconLon", "beaconSymbol", "host", "port",
+      "aprsisHost", "aprsisPort", "aprsisPasscode", "aprsisFilter"];
+    const dirtyFields = new Set();
+
     function setValueIfIdle(id, v) {
       const el = $(id);
-      if (el && document.activeElement !== el) el.value = v ?? "";
+      if (el && document.activeElement !== el && !dirtyFields.has(id)) el.value = v ?? "";
     }
 
     // The feedback line shows an action's result, a refresh error, or the
@@ -597,6 +607,9 @@
     });
 
     $("saveSettingsBtn").addEventListener("click", async () => {
+      // What this save sends, so a field edited again while it is in flight
+      // stays unsaved.
+      const sentValues = new Map(SETTINGS_FIELDS.map(id => [id, $(id).value]));
       try {
         await api("POST", "/api/save-settings", {
           callsign: $("source").value,
@@ -611,6 +624,9 @@
           aprsis_passcode: $("aprsisPasscode").value,
           aprsis_filter: $("aprsisFilter").value,
         });
+        for (const id of [...dirtyFields]) {
+          if ($(id).value === sentValues.get(id)) dirtyFields.delete(id);
+        }
         $("saveStatus").textContent = "Saved";
         pushLog("status", "Settings saved");
         refresh();
@@ -620,8 +636,12 @@
     ["source", "destination"].forEach(id => {
       $(id).addEventListener("input", () => { $(id).value = $(id).value.toUpperCase(); });
     });
+    SETTINGS_FIELDS.forEach(id => {
+      $(id).addEventListener("input", () => dirtyFields.add(id));
+    });
     $("source").addEventListener("change", () => {
-      setValueIfIdle("aprsisPasscode", derivePasscode($("source").value));
+      $("aprsisPasscode").value = derivePasscode($("source").value);
+      dirtyFields.add("aprsisPasscode");
     });
 
     $("remoteToken").value = getToken();

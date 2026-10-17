@@ -390,8 +390,10 @@ fn record(conn: &Connection, message: &Value, now: i64) -> rusqlite::Result<(Str
                 obj.insert("aprsType".to_string(), Value::String(aprs_type.to_string()));
                 obj.insert("isBulletin".to_string(), Value::Bool(is_bulletin));
             }
+            // The joined row counts as stored now, so a new-only export
+            // taken before the last part arrived carries it again.
             conn.execute(
-                "UPDATE received SET body = ?1, timestamp = ?2, aprs_type = ?3, is_bulletin = ?4, keep = ?5, data = ?6
+                "UPDATE received SET body = ?1, timestamp = ?2, stored_at = ?2, aprs_type = ?3, is_bulletin = ?4, keep = ?5, data = ?6
                  WHERE seq = ?7",
                 params![merged_body, now, aprs_type, is_bulletin, keep, data.to_string(), seq],
             )?;
@@ -538,13 +540,16 @@ pub struct SentRecord<'a> {
 }
 
 /// Insert a sent message the first time it is seen, then keep its status,
-/// attempt count and detail current on every later report.
+/// attempt count and detail current on every later report. A status change
+/// counts the row as stored now, so a new-only export taken before the ack
+/// came carries it again; a retry that leaves the status alone does not.
 fn upsert_sent(conn: &Connection, rec: &SentRecord, now: i64) -> rusqlite::Result<()> {
     conn.execute(
         "INSERT INTO sent (uuid, created_at, updated_at, stored_at, from_call, to_call, body, path, aprs_id, status, attempts, detail)
          VALUES (?1, ?2, ?3, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
          ON CONFLICT(uuid) DO UPDATE SET
              updated_at = excluded.updated_at,
+             stored_at = CASE WHEN status = excluded.status THEN stored_at ELSE excluded.stored_at END,
              status = excluded.status,
              attempts = excluded.attempts,
              detail = excluded.detail",
@@ -629,6 +634,43 @@ fn search_sent(conn: &Connection, query: &str, before: Option<Cursor>, limit: us
 /// delivery report; a storage failure leaves the app running.
 pub fn record_sent(app: &AppHandle, rec: &SentRecord) {
     let _ = with_store(app, |store| upsert_sent(&store.conn, rec, now_ms()).map_err(|err| err.to_string()));
+}
+
+/// A sent message as Resend needs it to queue the message again.
+#[derive(Debug, PartialEq)]
+pub struct StoredSent {
+    pub created_at: i64,
+    pub from_call: String,
+    pub to_call: String,
+    pub body: String,
+    pub path: String,
+    pub aprs_id: String,
+    pub status: String,
+}
+
+fn sent_by_uuid(conn: &Connection, uuid: &str) -> rusqlite::Result<Option<StoredSent>> {
+    conn.query_row(
+        "SELECT created_at, from_call, to_call, body, path, aprs_id, status FROM sent WHERE uuid = ?1",
+        params![uuid],
+        |row| {
+            Ok(StoredSent {
+                created_at: row.get(0)?,
+                from_call: row.get(1)?,
+                to_call: row.get(2)?,
+                body: row.get(3)?,
+                path: row.get(4)?,
+                aprs_id: row.get(5)?,
+                status: row.get(6)?,
+            })
+        },
+    )
+    .optional()
+}
+
+/// The stored copy of a sent message, for a Resend after the outbound queue
+/// has forgotten it (the queue starts empty at every launch).
+pub fn stored_sent(app: &AppHandle, uuid: &str) -> Result<Option<StoredSent>, String> {
+    with_store(app, |store| sent_by_uuid(&store.conn, uuid).map_err(|err| err.to_string()))
 }
 
 /// Newest-first sent messages, one page at a time.
@@ -819,6 +861,7 @@ pub fn last_new_only_export(app: AppHandle) -> Result<Option<i64>, String> {
 #[derive(Debug, PartialEq)]
 pub struct ImportSummary {
     pub added: usize,
+    pub updated: usize,
     pub skipped: usize,
 }
 
@@ -837,38 +880,98 @@ pub fn old_short_lived(rows: &[crate::message_import::ImportRow], retention_days
         .count()
 }
 
+/// How far along a sent message's delivery is, for an import choosing
+/// between the file's copy and the stored one.
+fn delivery_rank(status: &str) -> u8 {
+    match status {
+        "acked" => 3,
+        "expired" | "failed" => 2,
+        "sent" => 1,
+        _ => 0,
+    }
+}
+
+/// Bring a stored message up to the file's copy when that copy is further
+/// along: a sent message with a later delivery status, or a received
+/// message whose body continues the stored one (a multipart message whose
+/// last part arrived after the earlier export). Returns whether it changed.
+fn update_held(
+    tx: &Connection,
+    row: &crate::message_import::ImportRow,
+    seq: i64,
+    stored_status: &str,
+    stored_body: &str,
+    now: i64,
+) -> rusqlite::Result<bool> {
+    use crate::message_import::Direction;
+    if row.direction == Direction::Sent {
+        if delivery_rank(&row.status) <= delivery_rank(stored_status) {
+            return Ok(false);
+        }
+        tx.execute(
+            "UPDATE sent SET status = ?1, detail = 'imported', updated_at = ?2, stored_at = ?2 WHERE seq = ?3",
+            params![row.status, now, seq],
+        )?;
+        return Ok(true);
+    }
+    if row.body.len() <= stored_body.len() || !row.body.starts_with(stored_body) {
+        return Ok(false);
+    }
+    let (aprs_type, is_bulletin, data): (String, bool, String) =
+        tx.query_row("SELECT aprs_type, is_bulletin, data FROM received WHERE seq = ?1", params![seq], |r| {
+            Ok((r.get(0)?, r.get(1)?, r.get(2)?))
+        })?;
+    let mut data: Value = serde_json::from_str(&data).unwrap_or(Value::Null);
+    if let Some(obj) = data.as_object_mut() {
+        obj.insert("body".to_string(), Value::String(row.body.clone()));
+    }
+    let keep = is_conversation(&aprs_type, is_bulletin, &row.body);
+    tx.execute(
+        "UPDATE received SET body = ?1, keep = ?2, data = ?3, stored_at = ?4 WHERE seq = ?5",
+        params![row.body, keep, data.to_string(), now, seq],
+    )?;
+    Ok(true)
+}
+
 /// Store validated rows in one transaction. A row whose UUID is already
-/// stored is skipped, so importing a file twice changes nothing. A row
-/// without a UUID gets one, unless a message with the same direction,
-/// sender, addressee, text, and time is already stored. Imported rows count
-/// as stored now, for retention and for new-only exports.
+/// stored updates the stored copy when the file's copy is further along
+/// (see `update_held`) and is skipped otherwise, so importing a file twice
+/// changes nothing. A row without a UUID gets one, unless a message with
+/// the same direction, sender, addressee, text, and time is already stored.
+/// Imported and updated rows count as stored now, for retention and for
+/// new-only exports.
 fn import(conn: &Connection, rows: &[crate::message_import::ImportRow], now: i64) -> rusqlite::Result<ImportSummary> {
     use crate::message_import::Direction;
     let tx = conn.unchecked_transaction()?;
-    let mut summary = ImportSummary { added: 0, skipped: 0 };
+    let mut summary = ImportSummary { added: 0, updated: 0, skipped: 0 };
     for row in rows {
         let table = if row.direction == Direction::Sent { "sent" } else { "received" };
-        let exists = match &row.uuid {
+        // The stored copy's seq, sent status (empty for received), and body.
+        let read = |row: &rusqlite::Row| Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?, row.get::<_, String>(2)?));
+        let status_column = if row.direction == Direction::Sent { "status" } else { "''" };
+        let stored = match &row.uuid {
             Some(uuid) => tx
-                .query_row(&format!("SELECT 1 FROM {table} WHERE uuid = ?1"), params![uuid], |_| Ok(()))
-                .optional()?
-                .is_some(),
+                .query_row(&format!("SELECT seq, {status_column}, body FROM {table} WHERE uuid = ?1"), params![uuid], read)
+                .optional()?,
             None => {
                 let time_column = if row.direction == Direction::Sent { "created_at" } else { "timestamp" };
                 tx.query_row(
                     &format!(
-                        "SELECT 1 FROM {table} WHERE from_call = ?1 AND coalesce(to_call, '') = ?2
+                        "SELECT seq, {status_column}, body FROM {table} WHERE from_call = ?1 AND coalesce(to_call, '') = ?2
                          AND body = ?3 AND {time_column} = ?4"
                     ),
                     params![row.from, row.to, row.body, row.timestamp],
-                    |_| Ok(()),
+                    read,
                 )
                 .optional()?
-                .is_some()
             }
         };
-        if exists {
-            summary.skipped += 1;
+        if let Some((seq, stored_status, stored_body)) = stored {
+            if update_held(&tx, row, seq, &stored_status, &stored_body, now)? {
+                summary.updated += 1;
+            } else {
+                summary.skipped += 1;
+            }
             continue;
         }
         let uuid = row.uuid.clone().unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
@@ -933,8 +1036,9 @@ fn import(conn: &Connection, rows: &[crate::message_import::ImportRow], now: i64
 /// Store rows read from an import file.
 pub fn import_rows(app: &AppHandle, rows: &[crate::message_import::ImportRow]) -> Result<ImportSummary, String> {
     with_store(app, |store| {
-        // Importing only adds rows, so the duplicate check's memory of live
-        // packets stays valid.
+        // Importing adds rows or updates them in place under the same seq
+        // and UUID, so the duplicate check's memory of live packets stays
+        // valid.
         import(&store.conn, rows, now_ms()).map_err(|err| format!("import failed: {err}"))
     })
 }
@@ -1077,6 +1181,27 @@ mod tests {
         assert_eq!(rows[0]["attempts"], 1);
         assert_eq!(rows[0]["timestamp"], 1_000);
         assert_eq!(rows[0]["updatedAt"], 3_000);
+    }
+
+    #[test]
+    fn a_stored_sent_message_reads_back_for_resend() {
+        let conn = memory_db();
+        upsert_sent(&conn, &sent("s-1", "N6TEST-7", "expired", 5), 1_000).unwrap();
+
+        let stored = sent_by_uuid(&conn, "s-1").unwrap().unwrap();
+        assert_eq!(
+            stored,
+            StoredSent {
+                created_at: 1_000,
+                from_call: "WT1W-15".to_string(),
+                to_call: "N6TEST-7".to_string(),
+                body: "Hello".to_string(),
+                path: "WIDE1-1,WIDE2-1".to_string(),
+                aprs_id: "01".to_string(),
+                status: "expired".to_string(),
+            }
+        );
+        assert_eq!(sent_by_uuid(&conn, "missing").unwrap(), None);
     }
 
     #[test]
@@ -1456,12 +1581,64 @@ mod tests {
 
         let rows = crate::message_import::parse_csv(&original, 1_791_830_600_000).unwrap();
         let fresh = memory_db();
-        assert_eq!(import(&fresh, &rows, 1_791_830_600_000).unwrap(), ImportSummary { added: 3, skipped: 0 });
+        assert_eq!(import(&fresh, &rows, 1_791_830_600_000).unwrap(), ImportSummary { added: 3, updated: 0, skipped: 0 });
         assert_eq!(export_text(&fresh), original);
 
         // Importing the same file again changes nothing.
-        assert_eq!(import(&fresh, &rows, 1_791_830_700_000).unwrap(), ImportSummary { added: 0, skipped: 3 });
+        assert_eq!(import(&fresh, &rows, 1_791_830_700_000).unwrap(), ImportSummary { added: 0, updated: 0, skipped: 3 });
         assert_eq!(export_text(&fresh), original);
+    }
+
+    fn new_only_text(conn: &Connection, now: i64) -> String {
+        let mut out = Vec::new();
+        let filter = crate::message_export::ExportFilter { new_only: true, ..Default::default() };
+        export(conn, &mut out, &filter, now).unwrap();
+        String::from_utf8(out).unwrap()
+    }
+
+    #[test]
+    fn an_ack_or_last_part_after_a_new_only_export_reaches_the_next_one() {
+        let conn = memory_db();
+        let base = 1_791_830_400_000;
+        let report = |status| SentRecord { created_at: base, ..sent("6f1c2b7e-0d5a-4c1e-9f0b-2a3d4e5f6a7b", "N6TEST-7", status, 1) };
+        upsert_sent(&conn, &report("sent"), base).unwrap();
+        record(&conn, &message("N6TEST-7", Some("WT1W-15"), "Part one of the net report", "msg"), base).unwrap();
+        let first = new_only_text(&conn, base + 10_000);
+
+        upsert_sent(&conn, &report("acked"), base + 20_000).unwrap();
+        record(&conn, &message("N6TEST-7", Some("WT1W-15"), "and part two", "msg"), base + 20_000).unwrap();
+        let second = new_only_text(&conn, base + 30_000);
+        assert!(second.contains("\"acked\""), "{second}");
+        assert!(second.contains("Part one of the net report and part two"), "{second}");
+
+        let fresh = memory_db();
+        let rows = crate::message_import::parse_csv(&first, base + 40_000).unwrap();
+        assert_eq!(import(&fresh, &rows, base + 40_000).unwrap(), ImportSummary { added: 2, updated: 0, skipped: 0 });
+        let rows = crate::message_import::parse_csv(&second, base + 50_000).unwrap();
+        assert_eq!(import(&fresh, &rows, base + 50_000).unwrap(), ImportSummary { added: 0, updated: 2, skipped: 0 });
+
+        let status: String = fresh.query_row("SELECT status FROM sent", [], |r| r.get(0)).unwrap();
+        assert_eq!(status, "acked");
+        let body: String = fresh.query_row("SELECT body FROM received", [], |r| r.get(0)).unwrap();
+        assert_eq!(body, "Part one of the net report and part two");
+
+        // The older file again changes nothing: its copies are behind.
+        let rows = crate::message_import::parse_csv(&first, base + 60_000).unwrap();
+        assert_eq!(import(&fresh, &rows, base + 60_000).unwrap(), ImportSummary { added: 0, updated: 0, skipped: 2 });
+        let status: String = fresh.query_row("SELECT status FROM sent", [], |r| r.get(0)).unwrap();
+        assert_eq!(status, "acked");
+    }
+
+    #[test]
+    fn a_retry_that_keeps_the_status_does_not_count_as_new() {
+        let conn = memory_db();
+        upsert_sent(&conn, &sent("s-1", "N6TEST-7", "sent", 1), 1_000).unwrap();
+        upsert_sent(&conn, &sent("s-1", "N6TEST-7", "sent", 2), 5_000).unwrap();
+        let stored_at: i64 = conn.query_row("SELECT stored_at FROM sent", [], |r| r.get(0)).unwrap();
+        assert_eq!(stored_at, 1_000);
+        upsert_sent(&conn, &sent("s-1", "N6TEST-7", "acked", 2), 9_000).unwrap();
+        let stored_at: i64 = conn.query_row("SELECT stored_at FROM sent", [], |r| r.get(0)).unwrap();
+        assert_eq!(stored_at, 9_000);
     }
 
     #[test]
@@ -1470,7 +1647,7 @@ mod tests {
         let csv = "direction,from,to,body,timestamp\nreceived,K6TEST-9,AD6DM-15,Typed in by hand,2026-10-12 18:00:00\n";
         let rows = crate::message_import::parse_csv(csv, 1_791_830_400_000).unwrap();
         assert_eq!(import(&conn, &rows, 1_000).unwrap().added, 1);
-        assert_eq!(import(&conn, &rows, 2_000).unwrap(), ImportSummary { added: 0, skipped: 1 });
+        assert_eq!(import(&conn, &rows, 2_000).unwrap(), ImportSummary { added: 0, updated: 0, skipped: 1 });
         let uuid: String = conn.query_row("SELECT uuid FROM received", [], |r| r.get(0)).unwrap();
         assert!(uuid::Uuid::parse_str(&uuid).is_ok());
     }

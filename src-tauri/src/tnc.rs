@@ -654,6 +654,43 @@ async fn persist_queue(state: &AppState) -> Result<(), String> {
     fs::write(path, json).map_err(|err| format!("failed to persist queue: {err}"))
 }
 
+/// Whether the retry loop should send `msg` again. A message that went out
+/// but has no ack yet is sent again once its retry time passes, like one
+/// still queued or one whose last send failed; `send_attempt` expires it
+/// after MAX_ATTEMPTS.
+fn retry_due(msg: &QueuedMessage, now: u64) -> bool {
+    matches!(msg.status, DeliveryState::Queued | DeliveryState::Sent | DeliveryState::Failed)
+        && msg.next_retry_at_ms.is_none_or(|deadline| deadline <= now)
+}
+
+/// Whether a message to `destination` other than `except_uuid`, still
+/// waiting for its ack, uses message number `aprs_id`. Message numbers
+/// start over at every launch, so a resent message from an earlier session
+/// can meet a new one with its number. The receiving station would drop
+/// the second as a duplicate, and one ack can clear only one of them.
+fn number_in_use(queue: &[QueuedMessage], destination: &str, aprs_id: &str, except_uuid: &str) -> bool {
+    queue.iter().any(|msg| {
+        matches!(msg.status, DeliveryState::Queued | DeliveryState::Sent | DeliveryState::Failed)
+            && msg.aprs_id == aprs_id
+            && msg.uuid != except_uuid
+            && callsign_matches_station(&msg.destination, destination, true)
+    })
+}
+
+/// Resend sends as the station that sent the message the first time, so it
+/// refuses when the configured callsign has changed since (or the message
+/// was imported from another station's export).
+fn check_resend_source(sent_as: &str, configured: &str) -> Result<(), String> {
+    if !configured.trim().is_empty() && sent_as.trim().eq_ignore_ascii_case(configured.trim()) {
+        Ok(())
+    } else {
+        Err(format!(
+            "This message was sent as {sent_as}, and the callsign in Settings is {}. Send it as a new message instead.",
+            if configured.trim().is_empty() { "empty" } else { configured.trim() }
+        ))
+    }
+}
+
 pub async fn restart_retry_task(app: &AppHandle, state: &AppState, epoch: u64) {
     let state_for_retry = state.clone();
     let app_for_retry = app.clone();
@@ -668,10 +705,7 @@ pub async fn restart_retry_task(app: &AppHandle, state: &AppState, epoch: u64) {
                 let queue = state_for_retry.queue.lock().await;
                 queue
                     .iter()
-                    .filter(|msg| {
-                        (msg.status == DeliveryState::Queued || msg.status == DeliveryState::Failed)
-                            && msg.next_retry_at_ms.map(|deadline| deadline <= now).unwrap_or(true)
-                    })
+                    .filter(|msg| retry_due(msg, now))
                     .map(|msg| msg.id)
                     .collect()
             };
@@ -761,6 +795,13 @@ async fn send_attempt(
     };
 
     if item.status == DeliveryState::Acked || item.status == DeliveryState::Expired {
+        return Ok(());
+    }
+
+    // The retry loop picks due messages before sending them, so the first
+    // send from send_message or a resend can go out in between; skip a
+    // retry that is no longer due rather than send the same frame twice.
+    if reason == "retry" && !retry_due(item, now_ms()) {
         return Ok(());
     }
 
@@ -1552,15 +1593,23 @@ pub async fn send_message(
         return Err("Message is required".to_string());
     }
 
-    let message_id = {
-        let mut lock = state.next_id.lock().await;
-        let id = *lock;
-        *lock = lock.saturating_add(1);
-        id
-    };
-
     let source = source.trim().to_uppercase();
     let destination = destination.trim().to_uppercase();
+
+    // Skip a number another message to this station still holds.
+    let message_id = {
+        let queue = state.queue.lock().await;
+        let mut lock = state.next_id.lock().await;
+        let mut id = *lock;
+        for _ in 0..100 {
+            if !number_in_use(&queue, &destination, &format!("{:02}", id % 100), "") {
+                break;
+            }
+            id = id.saturating_add(1);
+        }
+        *lock = id.saturating_add(1);
+        id
+    };
     // Strip embedded CR/LF — must not appear in APRS info fields (per spec)
     let body = strip_crlf(message.trim());
     validate_aprs_message_text(&body)?;
@@ -1636,6 +1685,123 @@ pub async fn send_message(
         payload_hex: payloads.ax25_hex,
         bytes: payloads.ax25_frame.len(),
     })
+}
+
+/// Put an expired message back at the start of its retries.
+fn rearm_for_resend(item: &mut QueuedMessage, now: u64) -> Result<(), String> {
+    if item.status != DeliveryState::Expired {
+        return Err("Only an expired message can be resent".to_string());
+    }
+    item.attempt_count = 0;
+    item.status = DeliveryState::Queued;
+    item.next_retry_at_ms = Some(now);
+    item.last_error = None;
+    Ok(())
+}
+
+/// Queue an expired message again under its original message number, so a
+/// station that heard an earlier copy and only lost its ack treats this one
+/// as a repeat. The queue starts empty at every launch, so a message from an
+/// earlier session is rebuilt from the sent history.
+#[tauri::command]
+pub async fn resend_message(app: AppHandle, uuid: String) -> Result<(), String> {
+    let state = app.state::<AppState>().inner().clone();
+    let aprsis_state = app.state::<crate::aprsis::AprsIsState>().inner().clone();
+
+    ensure_queue_storage(&app, &state).await?;
+
+    let configured = crate::settings::load_settings(app.clone()).source;
+    let in_use = |queue: &[QueuedMessage], destination: &str, aprs_id: &str| {
+        if number_in_use(queue, destination, aprs_id, &uuid) {
+            Err(format!(
+                "Message number {aprs_id} is in use by another message to {destination} still waiting for its ack. Resend this one after that finishes."
+            ))
+        } else {
+            Ok(())
+        }
+    };
+
+    let in_queue = {
+        let mut queue = state.queue.lock().await;
+        match queue.iter().position(|msg| msg.uuid == uuid) {
+            Some(idx) => {
+                let (destination, aprs_id) = (queue[idx].destination.clone(), queue[idx].aprs_id.clone());
+                if queue[idx].status == DeliveryState::Expired {
+                    check_resend_source(&queue[idx].source, &configured)?;
+                    in_use(&queue, &destination, &aprs_id)?;
+                }
+                let item = &mut queue[idx];
+                rearm_for_resend(item, now_ms())?;
+                Some(item.id)
+            }
+            None => None,
+        }
+    };
+
+    let message_id = match in_queue {
+        Some(id) => id,
+        None => {
+            let stored = crate::message_store::stored_sent(&app, &uuid)?
+                .ok_or_else(|| "That message is no longer in the history".to_string())?;
+            if stored.status != "expired" {
+                return Err("Only an expired message can be resent".to_string());
+            }
+            check_resend_source(&stored.from_call, &configured)?;
+            let message_id = {
+                let mut lock = state.next_id.lock().await;
+                let id = *lock;
+                *lock = lock.saturating_add(1);
+                id
+            };
+            let pending_reply_ack = latest_reply_ack_for_station(&state, &stored.to_call).await;
+            let payloads = build_queued_message_payloads(
+                &stored.from_call,
+                &stored.to_call,
+                &stored.path,
+                &stored.body,
+                &stored.aprs_id,
+                pending_reply_ack.as_deref(),
+            )?;
+            let mut queue = state.queue.lock().await;
+            in_use(&queue, &stored.to_call, &stored.aprs_id)?;
+            queue.push(QueuedMessage {
+                id: message_id,
+                uuid: uuid.clone(),
+                destination: stored.to_call,
+                body: stored.body,
+                path: stored.path,
+                payload: payloads.ax25_hex.clone(),
+                ax25_hex: payloads.ax25_hex,
+                aprsis_payload: payloads.aprsis_payload,
+                source: stored.from_call,
+                aprs_id: stored.aprs_id,
+                created_at_ms: stored.created_at.max(0) as u64,
+                attempt_count: 0,
+                status: DeliveryState::Queued,
+                next_retry_at_ms: Some(now_ms()),
+                last_error: None,
+            });
+            message_id
+        }
+    };
+
+    persist_queue(&state).await?;
+
+    let snapshot = state
+        .queue
+        .lock()
+        .await
+        .iter()
+        .find(|msg| msg.id == message_id)
+        .cloned()
+        .ok_or_else(|| "Failed to resolve queued message state".to_string())?;
+    emit_delivery(&app, &snapshot, Some("resent".to_string()));
+
+    let has_transport = state.client.lock().await.is_some() || aprsis_state.handle.lock().await.is_some();
+    if has_transport {
+        let _ = send_attempt(&app, &state, message_id, "resend").await;
+    }
+    Ok(())
 }
 
 #[tauri::command]
@@ -1809,7 +1975,7 @@ pub fn get_manual_beacon_cooldown_remaining(app: AppHandle) -> u64 {
 
 #[cfg(test)]
 mod tests {
-    use super::{build_queued_message_payloads, callsign_matches_station, ack_ids_for_station, is_agwpe_monitor_text, parse_ack_id, parse_ax25_station, parse_digipeater_path, resolve_uncompressed_symbol, split_reply_ack_id, strip_crlf, validate_aprs_message_text, validate_ax25_callsign, validate_position, validate_uncompressed_position_comment, APRS_TOCALL};
+    use super::{build_queued_message_payloads, check_resend_source, number_in_use, rearm_for_resend, retry_delay_ms, retry_due, DeliveryState, QueuedMessage, MAX_ATTEMPTS, callsign_matches_station, ack_ids_for_station, is_agwpe_monitor_text, parse_ack_id, parse_ax25_station, parse_digipeater_path, resolve_uncompressed_symbol, split_reply_ack_id, strip_crlf, validate_aprs_message_text, validate_ax25_callsign, validate_position, validate_uncompressed_position_comment, APRS_TOCALL};
     use crate::ax25::build_aprs_position_info;
 
     #[test]
@@ -2033,6 +2199,98 @@ mod tests {
     fn validate_aprs_message_text_accepts_67_chars() {
         let valid = "X".repeat(67);
         assert_eq!(validate_aprs_message_text(&valid), Ok(()));
+    }
+
+    fn queued(status: DeliveryState, next_retry_at_ms: Option<u64>) -> QueuedMessage {
+        QueuedMessage {
+            id: 1,
+            uuid: String::new(),
+            destination: "WT1W-15".to_string(),
+            body: "Test".to_string(),
+            path: String::new(),
+            payload: String::new(),
+            ax25_hex: String::new(),
+            aprsis_payload: String::new(),
+            source: "K6TEST".to_string(),
+            aprs_id: "1".to_string(),
+            created_at_ms: 0,
+            attempt_count: 1,
+            status,
+            next_retry_at_ms,
+            last_error: None,
+        }
+    }
+
+    #[test]
+    fn an_unacked_message_is_sent_again_once_its_retry_time_passes() {
+        let msg = queued(DeliveryState::Sent, Some(15_000));
+        assert!(!retry_due(&msg, 14_999));
+        assert!(retry_due(&msg, 15_000));
+    }
+
+    #[test]
+    fn queued_and_failed_messages_still_retry() {
+        assert!(retry_due(&queued(DeliveryState::Queued, None), 0));
+        assert!(retry_due(&queued(DeliveryState::Failed, Some(10)), 10));
+        assert!(!retry_due(&queued(DeliveryState::Failed, Some(10)), 9));
+    }
+
+    #[test]
+    fn acked_and_expired_messages_are_never_sent_again() {
+        assert!(!retry_due(&queued(DeliveryState::Acked, None), u64::MAX));
+        assert!(!retry_due(&queued(DeliveryState::Expired, None), u64::MAX));
+    }
+
+    #[test]
+    fn retries_back_off_and_stop_after_the_last_attempt() {
+        let delays: Vec<u64> = (1..=MAX_ATTEMPTS).map(retry_delay_ms).collect();
+        assert_eq!(delays, vec![15_000, 30_000, 60_000, 120_000, 240_000]);
+    }
+
+    #[test]
+    fn resend_restarts_an_expired_message_under_its_own_number() {
+        let mut msg = queued(DeliveryState::Expired, None);
+        msg.attempt_count = MAX_ATTEMPTS;
+        msg.last_error = Some("max retry attempts reached".to_string());
+        rearm_for_resend(&mut msg, 50_000).unwrap();
+        assert_eq!(msg.status, DeliveryState::Queued);
+        assert_eq!(msg.attempt_count, 0);
+        assert_eq!(msg.next_retry_at_ms, Some(50_000));
+        assert_eq!(msg.last_error, None);
+        assert_eq!(msg.aprs_id, "1");
+        assert!(retry_due(&msg, 50_000));
+    }
+
+    #[test]
+    fn a_number_is_in_use_only_while_another_message_to_that_station_waits() {
+        let mut waiting = queued(DeliveryState::Sent, None);
+        waiting.uuid = "a".to_string();
+        let queue = vec![waiting.clone()];
+        assert!(number_in_use(&queue, "WT1W-15", "1", "b"));
+        assert!(number_in_use(&queue, "WT1W", "1", "b"));
+        assert!(!number_in_use(&queue, "WT1W-15", "1", "a"));
+        assert!(!number_in_use(&queue, "WT1W-15", "2", "b"));
+        assert!(!number_in_use(&queue, "N6TEST-7", "1", "b"));
+        for status in [DeliveryState::Acked, DeliveryState::Expired] {
+            let done = vec![QueuedMessage { status, ..waiting.clone() }];
+            assert!(!number_in_use(&done, "WT1W-15", "1", "b"));
+        }
+    }
+
+    #[test]
+    fn resend_sends_only_as_the_callsign_that_sent_the_message() {
+        assert!(check_resend_source("AD6DM-15", "ad6dm-15").is_ok());        assert!(check_resend_source("AD6DM-15", "AD6DM-9").is_err());
+        assert!(check_resend_source("W6OTHER", "AD6DM-15").is_err());
+        assert!(check_resend_source("AD6DM-15", "").is_err());
+    }
+
+    #[test]
+    fn resend_refuses_a_message_still_in_flight_or_acked() {
+        for status in [DeliveryState::Queued, DeliveryState::Sent, DeliveryState::Failed, DeliveryState::Acked] {
+            let mut msg = queued(status.clone(), Some(10));
+            assert!(rearm_for_resend(&mut msg, 50_000).is_err());
+            assert_eq!(msg.status, status);
+        }
     }
 }
 

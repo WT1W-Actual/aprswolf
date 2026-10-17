@@ -121,8 +121,9 @@ The [End User Guide](docs/END-USER-GUIDE.md) walks through the rest.
 ## What It Does
 
 - Connects to a TNC such as Dire Wolf or Graywolf over TCP (KISS to send, AGW to receive), or to APRS-IS over the internet.
-- Sends APRS messages with message numbers, then retries with backoff until the other station acks, the message fails, or it expires.
+- Sends APRS messages with message numbers, then retries with backoff (15 seconds, doubling to 4 minutes) until the other station acks or five tries go unanswered and the message expires. A send that fails to leave the computer is retried the same way.
 - Shows Sent and Received side by side, with each sent message's delivery status (queued, sent, acked, failed, expired) kept current.
+- Resends an expired message from its right-click menu, under its original message number. Resend waits while another message to that station still holds the number, and it only sends as the callsign that sent the message the first time.
 - Filters received traffic by type: To Me, Bulletins, Queries, Messages, Weather, Position, Status, Objects, Items, Mic-E, Telemetry, Other.
 - Starts a reply when you click a received message.
 - Keeps sent and received messages in a local database across restarts, and searches all of it from one search field.
@@ -160,7 +161,7 @@ What is kept:
 
 - Sent messages, and received messages, queries, and bulletins, are kept until you delete them.
 - Positions, weather, telemetry, status, objects, items, Mic-E, and acks are removed after 7 days by default. Change this under Preferences > Message History (1 day, 7 days, 30 days, or keep everything). The trim runs at most once an hour while packets arrive.
-- A sent message still waiting for its ack when the app closes is marked expired at the next launch, since nothing will retry it.
+- A sent message still waiting for its ack when the app closes is marked expired at the next launch, since nothing will retry it. Right-click it under Sent Messages and choose **Resend** to send it again.
 - A packet heard again within 30 seconds (over RF and APRS-IS, or through a second digipeater) is stored once. The Traffic Log still shows every copy, tagged `(duplicate)`.
 
 Each list loads the newest 200 messages. In the separate Messages window (**Pop Out ↗**), **Load older messages** at the bottom fetches the next 200.
@@ -184,7 +185,7 @@ Each opens a dialog with a **Delete from database** box, unchecked by default. L
 With nothing changed, the file holds sent messages and received messages, queries, and bulletins, oldest first, hidden ones included. The window can narrow it:
 
 - **Sent and received**, **Received only**, or **Sent only**.
-- **Only messages new since the last new-only export.** New means added to this computer's history since then, so messages imported from elsewhere still count. The first new-only export takes everything, and a second one straight after it is empty. Only a new-only export with no other filter moves the mark, so messages a narrower one left out still reach the next. Each message goes out as it stood then; a later ack or the rest of a multipart message doesn't send it again.
+- **Only messages new since the last new-only export.** New means added to this computer's history since then, so messages imported from elsewhere still count. The first new-only export takes everything, and a second one straight after it is empty. Only a new-only export with no other filter moves the mark, so messages a narrower one left out still reach the next. A message that changes after an export, when its ack or the rest of a multipart message arrives, counts as new again and goes out in the next one.
 - **Limit to a date range**, From and To in local time, both days included.
 - **Callsigns**, matched against sender or addressee. A callsign without an SSID matches all of its SSIDs.
 - **Include positions, weather, and other short-lived packets**, off by default. Turning it on warns that those packets are removed after the retention period (7 days by default), so only the ones still stored are exported.
@@ -196,7 +197,7 @@ The columns are `uuid`, `timestamp` (ISO 8601, UTC), `direction` (sent or receiv
 **File > Import Messages...** (Cmd+Shift+I on macOS, Ctrl+Shift+I elsewhere) reads a CSV export back into your history, from this computer or another one, including a file you edited by hand. Messages land in the lists at their own time.
 
 - Columns are matched by name in any order. `direction`, `from`, `body`, and `timestamp` are required; the rest are optional and unknown columns are ignored.
-- A message whose `uuid` is already in your history is skipped, so importing the same file twice changes nothing. A row with an empty `uuid` gets a new one, unless the same message (direction, sender, addressee, text, and time) is already there.
+- A message whose `uuid` is already in your history is skipped, so importing the same file twice changes nothing, unless the file's copy is further along: a sent message with a later status (acked over expired or failed, those over sent, sent over queued) or a received message whose text continues the stored one. Those update the stored copy, so importing two new-only exports in order leaves the ack and the whole multipart text. A row with an empty `uuid` gets a new one, unless the same message (direction, sender, addressee, text, and time) is already there.
 - The apostrophe that export puts in front of formula-like text is removed.
 - Every row is checked before anything is stored: callsigns, a known `aprs_type`, a time from 1990 to now (a time without a zone is read as UTC), a valid `uuid`, a message number of up to five letters or digits, and a status of acked, failed, or expired for sent messages. If any row fails, nothing is imported and the dialog lists the rows and what's wrong.
 - Positions, weather, and other short-lived packets older than the retention period (Preferences > Message History) bring up a warning with their count before anything is stored. **Cancel** leaves your history as it was.

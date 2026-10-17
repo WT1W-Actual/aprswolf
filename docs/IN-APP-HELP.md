@@ -133,6 +133,7 @@ Use filters, search, the Messages window, and the traffic log to manage APRS tra
 - A red count on `To Me`, and on the app icon, shows messages addressed to you that arrived while APRSWolf was in the background. You can turn the app icon count off in Preferences.
 - `Promiscuous Base-Call` is a main-window toggle that also treats messages for your base callsign as yours.
 - The search field in the Sent Messages header searches sent and received messages across the whole history and filters both panes.
+- Right-click an expired sent message and choose `Resend` to queue it again under its original message number. It's refused while another message to that station still holds the number, or when your callsign has changed since it was sent.
 - `Pop Out` opens the Messages window: sent and received in one timeline, with its own search and reply behavior.
 - A packet heard twice, over RF and APRS-IS or through two digipeaters, is listed once.
 - Multipart stitching is applied for near-sequential fragments from the same station.
@@ -142,7 +143,7 @@ Clearing messages: hover a message and click `×` to clear it, or use `Clear all
 
 Exporting messages: `File > Export Messages...` (Cmd+Shift+E on macOS, Ctrl+Shift+E on Windows and Linux) opens the Export Messages window. By default it saves sent and received messages, queries, and bulletins to a CSV file, oldest first, hidden ones included. It can narrow the file to sent or received, messages new since the last new-only export, a date range, or some callsigns, and can add positions, weather, and other short-lived packets. Times in the file are in UTC.
 
-Importing messages: `File > Import Messages...` (Cmd+Shift+I on macOS, Ctrl+Shift+I on Windows and Linux) reads an export back in, even one edited by hand. Messages already in your history are skipped, so a second import of the same file changes nothing. Every row is checked first; if any is wrong, nothing is imported and the dialog lists what to fix. Old positions and other short-lived packets bring up a warning before they're stored.
+Importing messages: `File > Import Messages...` (Cmd+Shift+I on macOS, Ctrl+Shift+I on Windows and Linux) reads an export back in, even one edited by hand. Messages already in your history are skipped, so a second import of the same file changes nothing. A copy that's further along, such as an acked message or a multipart message with its later parts, updates the one you have. Every row is checked first; if any is wrong, nothing is imported and the dialog lists what to fix. Old positions and other short-lived packets bring up a warning before they're stored.
 
 Received Message Filters: the filter bar appears above Received Messages. `All` returns the full list. `To Me` follows your station callsign, `Messages` shows every APRS message frame, and `Promiscuous Base-Call` expands To Me to include your base call without the SSID.
 

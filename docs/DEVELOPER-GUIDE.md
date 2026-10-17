@@ -167,7 +167,7 @@ The remote web control is **not a React app** - it's a standalone HTML file serv
 
 | File | Purpose |
 |------|---------|
-| `src-tauri/remote-control.html` | Phone-friendly dashboard for remote monitoring | ~400 LOC |
+| `src-tauri/remote-control.html` | Phone-friendly dashboard for remote monitoring; `src/remoteControl.test.ts` runs it in jsdom against a stubbed API | ~650 LOC |
 
 This was extracted from a 1,600-line inline string inside `webserver.rs` - it used to be embedded as a Rust string literal. Extracting it made the HTML editable without recompiling Rust, and let us trim 75% of dead code.
 
@@ -177,8 +177,8 @@ This was extracted from a 1,600-line inline string inside `webserver.rs` - it us
 
 | Table | Holds |
 |-------|-------|
-| `received` | Every stored received packet, with `uuid`, `timestamp` (message time), `stored_at` (when it entered this database), `keep` (conversation is kept forever, everything else is trimmed by the retention setting), and `hidden` |
-| `sent` | Sent messages with their delivery status, `created_at` (message time), `stored_at`, and `hidden` |
+| `received` | Every stored received packet, with `uuid`, `timestamp` (message time), `stored_at` (when it entered this database, moved forward when a multipart join or an import changes it), `keep` (conversation is kept forever, everything else is trimmed by the retention setting), and `hidden` |
+| `sent` | Sent messages with their delivery status, `created_at` (message time), `stored_at` (moved forward when the delivery status changes, so new-only exports carry later acks), and `hidden` |
 | `received_fts`, `sent_fts` | FTS5 indexes for search, kept current by triggers |
 | `meta` | Key-value pairs; holds the last new-only export mark |
 
@@ -313,6 +313,8 @@ Key rules:
 - **Retention.** Messages, queries, and bulletins are kept until deleted. Positions, weather, telemetry, status, objects, items, Mic-E, and acks are trimmed after 7 days by default (Preferences > Message History: 1/7/30 days or keep everything). The trim runs at most once an hour while packets arrive.
 - **Duplicate suppression.** A packet heard twice within 30 seconds (RF + APRS-IS, or two digipeaters) is fingerprinted on sender, addressee, body, and message number and stored once. The duplicate's event carries the first copy's UUID and sequence with `duplicate` set, so the lists skip it and the Traffic Log tags it `(duplicate)`.
 - **Hide vs. delete.** The `hidden` flag keeps a cleared message in the database so search still finds it (marked `HIDDEN`); a real delete removes the row. Lists and the web remote leave hidden rows out, and a new multipart piece never joins a hidden row.
+- **Import updates.** An imported message the store already holds updates the stored copy only when the file's copy is further along: a later sent status (acked, then expired or failed, then sent, then queued) or a received body that continues the stored one. Everything else is skipped, so importing a file twice changes nothing.
+- **Retries and message numbers.** The retry loop in `tnc.rs` sends Queued, Sent, and Failed messages again on the `retry_delay_ms` backoff and expires them after `MAX_ATTEMPTS`. Message numbers come from the queue counter, which starts over at every launch, so `send_message` skips a number that another message to the same station still holds. `resend_message` keeps the original number and refuses while it's held, or when the configured callsign differs from the one the message was sent as.
 - **Legacy import.** On first launch the old `received_messages.json` is imported once and renamed `received_messages.json.migrated`.
 
 **Don't re-introduce:** Don't write to `messages.db` from the frontend, and don't key message rows by a session counter. Both were the source of the stale-duplicate bug fixed in v1.1.0.

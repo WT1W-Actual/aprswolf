@@ -192,6 +192,7 @@ Features:
 - Hide ACK messages unless you explicitly enable them
 - See a red count on `To Me` for messages addressed to you that arrived while APRSWolf was in the background; the app icon shows the same count unless you turn it off in Preferences
 - Search sent and received messages from the field in the Sent Messages header
+- Right-click an expired sent message and choose `Resend` to queue it again under its original message number. It's refused while another message to that station is still waiting for an ack under the same number, or when the callsign in Preferences differs from the one the message was sent as
 - Hide or delete messages (see [Searching And Clearing Messages](#searching-and-clearing-messages))
 - Pop out a separate Messages window that shows sent and received together
 - Open the Help window for a task-focused walkthrough without leaving the app
@@ -267,14 +268,14 @@ Choose `File > Export Messages...` (Cmd+Shift+E on macOS, Ctrl+Shift+E on Window
 Left as it opens, the window exports your sent messages and received messages, queries, and bulletins, oldest first, hidden ones included. To narrow the file:
 
 - Choose `Sent and received`, `Received only`, or `Sent only`.
-- Check `Only messages new since the last new-only export` to pick up where your last such export stopped. The first one takes everything; one right after it is empty. Only a new-only export with no other filter counts as the last one, so messages a narrower export left out still come along next time. A message goes out as it stood at the time: if it was still waiting for its ack, or still missing a later part, the next new-only export won't carry it again once the ack or the last part arrives.
+- Check `Only messages new since the last new-only export` to pick up where your last such export stopped. The first one takes everything; one right after it is empty. Only a new-only export with no other filter counts as the last one, so messages a narrower export left out still come along next time. A message still waiting for its ack, or still missing a later part, goes out again in the next new-only export once the ack or the last part arrives.
 - Check `Limit to a date range` and set From and To. Both days are included.
 - Enter callsigns, separated by commas, to keep messages to or from them. `K6ABC` matches every SSID; `K6ABC-9` matches only that one.
 - Check `Include positions, weather, and other short-lived packets` to add them. APRSWolf warns first that those packets are removed after the retention period set in Preferences, so only the ones still stored are exported.
 
 ### Importing Messages
 
-Choose `File > Import Messages...` (Cmd+Shift+I on macOS, Ctrl+Shift+I on Windows and Linux) and pick a CSV export, from this computer or another, even one you edited in a spreadsheet. Imported messages show in the lists at their own time. Messages already in your history are skipped, so importing a file twice does no harm. A row you typed in yourself needs `direction` (sent or received), `from`, `body`, and `timestamp`; sent rows also need `to` and a `status` of acked, failed, or expired. A time without a zone is read as UTC, and a time in the future is refused.
+Choose `File > Import Messages...` (Cmd+Shift+I on macOS, Ctrl+Shift+I on Windows and Linux) and pick a CSV export, from this computer or another, even one you edited in a spreadsheet. Imported messages show in the lists at their own time. Messages already in your history are skipped, so importing a file twice does no harm. A copy that's further along updates the one you have: an acked message over one still marked expired, or a multipart message with its later parts. A row you typed in yourself needs `direction` (sent or received), `from`, `body`, and `timestamp`; sent rows also need `to` and a `status` of acked, failed, or expired. A time without a zone is read as UTC, and a time in the future is refused.
 
 APRSWolf checks every row first. If one is wrong, nothing is imported, and the dialog names each bad row and what to fix. If the file holds positions, weather, or other short-lived packets older than your retention setting, you're asked before they're stored; `Cancel` leaves your history unchanged.
 
@@ -399,7 +400,7 @@ What you can do from this page:
 - send messages from the send row at the top, laid out like the desktop main window
 - read sent and received messages side by side, filtered with All, To Me, Messages, and Bulletins (acks stay hidden unless Show ACKs is on in the desktop app's Preferences), and tap a received message to reply to its sender
 - connect or disconnect TNC or APRS-IS mode, send a beacon, and clear the queue from the bottom bar, where each has its status dot
-- change station and connection settings under Settings, and follow events under Activity
+- change station and connection settings under Settings, and follow events under Activity; a field you've changed keeps your edit until you click Save, even while new traffic arrives
 - turn remote control off with Disable Remote
 
 On a phone the Sent and Received panes stack.
