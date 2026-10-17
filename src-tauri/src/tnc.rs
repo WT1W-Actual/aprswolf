@@ -654,6 +654,15 @@ async fn persist_queue(state: &AppState) -> Result<(), String> {
     fs::write(path, json).map_err(|err| format!("failed to persist queue: {err}"))
 }
 
+/// Whether the retry loop should send `msg` again. A message that went out
+/// but has no ack yet is sent again once its retry time passes, like one
+/// still queued or one whose last send failed; `send_attempt` expires it
+/// after MAX_ATTEMPTS.
+fn retry_due(msg: &QueuedMessage, now: u64) -> bool {
+    matches!(msg.status, DeliveryState::Queued | DeliveryState::Sent | DeliveryState::Failed)
+        && msg.next_retry_at_ms.is_none_or(|deadline| deadline <= now)
+}
+
 pub async fn restart_retry_task(app: &AppHandle, state: &AppState, epoch: u64) {
     let state_for_retry = state.clone();
     let app_for_retry = app.clone();
@@ -668,10 +677,7 @@ pub async fn restart_retry_task(app: &AppHandle, state: &AppState, epoch: u64) {
                 let queue = state_for_retry.queue.lock().await;
                 queue
                     .iter()
-                    .filter(|msg| {
-                        (msg.status == DeliveryState::Queued || msg.status == DeliveryState::Failed)
-                            && msg.next_retry_at_ms.map(|deadline| deadline <= now).unwrap_or(true)
-                    })
+                    .filter(|msg| retry_due(msg, now))
                     .map(|msg| msg.id)
                     .collect()
             };
@@ -1809,7 +1815,7 @@ pub fn get_manual_beacon_cooldown_remaining(app: AppHandle) -> u64 {
 
 #[cfg(test)]
 mod tests {
-    use super::{build_queued_message_payloads, callsign_matches_station, ack_ids_for_station, is_agwpe_monitor_text, parse_ack_id, parse_ax25_station, parse_digipeater_path, resolve_uncompressed_symbol, split_reply_ack_id, strip_crlf, validate_aprs_message_text, validate_ax25_callsign, validate_position, validate_uncompressed_position_comment, APRS_TOCALL};
+    use super::{build_queued_message_payloads, retry_delay_ms, retry_due, DeliveryState, QueuedMessage, MAX_ATTEMPTS, callsign_matches_station, ack_ids_for_station, is_agwpe_monitor_text, parse_ack_id, parse_ax25_station, parse_digipeater_path, resolve_uncompressed_symbol, split_reply_ack_id, strip_crlf, validate_aprs_message_text, validate_ax25_callsign, validate_position, validate_uncompressed_position_comment, APRS_TOCALL};
     use crate::ax25::build_aprs_position_info;
 
     #[test]
@@ -2033,6 +2039,52 @@ mod tests {
     fn validate_aprs_message_text_accepts_67_chars() {
         let valid = "X".repeat(67);
         assert_eq!(validate_aprs_message_text(&valid), Ok(()));
+    }
+
+    fn queued(status: DeliveryState, next_retry_at_ms: Option<u64>) -> QueuedMessage {
+        QueuedMessage {
+            id: 1,
+            uuid: String::new(),
+            destination: "WT1W-15".to_string(),
+            body: "Test".to_string(),
+            path: String::new(),
+            payload: String::new(),
+            ax25_hex: String::new(),
+            aprsis_payload: String::new(),
+            source: "K6TEST".to_string(),
+            aprs_id: "1".to_string(),
+            created_at_ms: 0,
+            attempt_count: 1,
+            status,
+            next_retry_at_ms,
+            last_error: None,
+        }
+    }
+
+    #[test]
+    fn an_unacked_message_is_sent_again_once_its_retry_time_passes() {
+        let msg = queued(DeliveryState::Sent, Some(15_000));
+        assert!(!retry_due(&msg, 14_999));
+        assert!(retry_due(&msg, 15_000));
+    }
+
+    #[test]
+    fn queued_and_failed_messages_still_retry() {
+        assert!(retry_due(&queued(DeliveryState::Queued, None), 0));
+        assert!(retry_due(&queued(DeliveryState::Failed, Some(10)), 10));
+        assert!(!retry_due(&queued(DeliveryState::Failed, Some(10)), 9));
+    }
+
+    #[test]
+    fn acked_and_expired_messages_are_never_sent_again() {
+        assert!(!retry_due(&queued(DeliveryState::Acked, None), u64::MAX));
+        assert!(!retry_due(&queued(DeliveryState::Expired, None), u64::MAX));
+    }
+
+    #[test]
+    fn retries_back_off_and_stop_after_the_last_attempt() {
+        let delays: Vec<u64> = (1..=MAX_ATTEMPTS).map(retry_delay_ms).collect();
+        assert_eq!(delays, vec![15_000, 30_000, 60_000, 120_000, 240_000]);
     }
 }
 
