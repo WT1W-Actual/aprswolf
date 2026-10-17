@@ -268,14 +268,14 @@ Choose `File > Export Messages...` (Cmd+Shift+E on macOS, Ctrl+Shift+E on Window
 Left as it opens, the window exports your sent messages and received messages, queries, and bulletins, oldest first, hidden ones included. To narrow the file:
 
 - Choose `Sent and received`, `Received only`, or `Sent only`.
-- Check `Only messages new since the last new-only export` to pick up where your last such export stopped. The first one takes everything; one right after it is empty. Only a new-only export with no other filter counts as the last one, so messages a narrower export left out still come along next time. A message goes out as it stood at the time: if it was still waiting for its ack, or still missing a later part, the next new-only export won't carry it again once the ack or the last part arrives.
+- Check `Only messages new since the last new-only export` to pick up where your last such export stopped. The first one takes everything; one right after it is empty. Only a new-only export with no other filter counts as the last one, so messages a narrower export left out still come along next time. A message still waiting for its ack, or still missing a later part, goes out again in the next new-only export once the ack or the last part arrives.
 - Check `Limit to a date range` and set From and To. Both days are included.
 - Enter callsigns, separated by commas, to keep messages to or from them. `K6ABC` matches every SSID; `K6ABC-9` matches only that one.
 - Check `Include positions, weather, and other short-lived packets` to add them. APRSWolf warns first that those packets are removed after the retention period set in Preferences, so only the ones still stored are exported.
 
 ### Importing Messages
 
-Choose `File > Import Messages...` (Cmd+Shift+I on macOS, Ctrl+Shift+I on Windows and Linux) and pick a CSV export, from this computer or another, even one you edited in a spreadsheet. Imported messages show in the lists at their own time. Messages already in your history are skipped, so importing a file twice does no harm. A row you typed in yourself needs `direction` (sent or received), `from`, `body`, and `timestamp`; sent rows also need `to` and a `status` of acked, failed, or expired. A time without a zone is read as UTC, and a time in the future is refused.
+Choose `File > Import Messages...` (Cmd+Shift+I on macOS, Ctrl+Shift+I on Windows and Linux) and pick a CSV export, from this computer or another, even one you edited in a spreadsheet. Imported messages show in the lists at their own time. Messages already in your history are skipped, so importing a file twice does no harm. A copy that's further along updates the one you have: an acked message over one still marked expired, or a multipart message with its later parts. A row you typed in yourself needs `direction` (sent or received), `from`, `body`, and `timestamp`; sent rows also need `to` and a `status` of acked, failed, or expired. A time without a zone is read as UTC, and a time in the future is refused.
 
 APRSWolf checks every row first. If one is wrong, nothing is imported, and the dialog names each bad row and what to fix. If the file holds positions, weather, or other short-lived packets older than your retention setting, you're asked before they're stored; `Cancel` leaves your history unchanged.
 

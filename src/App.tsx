@@ -776,7 +776,11 @@ function App() {
         if (active && Array.isArray(sent)) {
           setSentItems((prev) => {
             const live = new Map(prev.filter((item) => item.uuid).map((item) => [item.uuid, item]));
-            return sent.map((item) => live.get(item.uuid) ?? { ...item, id: nextId() });
+            return sent.map((item) => {
+              const held = live.get(item.uuid);
+              if (held && (held.status === "queued" || held.status === "sent")) return held;
+              return { ...item, id: held?.id ?? nextId() };
+            });
           });
         }
       } catch {/* keep the current list */}

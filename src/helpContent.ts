@@ -251,7 +251,7 @@ export const HELP_SECTIONS: HelpSection[] = [
         type: "callout",
         tone: "info",
         title: "Importing messages",
-        text: "File > Import Messages... (Cmd+Shift+I on macOS, Ctrl+Shift+I on Windows and Linux) reads an export back in, even one edited by hand. Messages already in your history are skipped, so a second import of the same file changes nothing. Every row is checked first; if any is wrong, nothing is imported and the dialog lists what to fix. Old positions and other short-lived packets bring up a warning before they're stored.",
+        text: "File > Import Messages... (Cmd+Shift+I on macOS, Ctrl+Shift+I on Windows and Linux) reads an export back in, even one edited by hand. Messages already in your history are skipped, so a second import of the same file changes nothing. A copy that's further along, such as an acked message or a multipart message with its later parts, updates the one you have. Every row is checked first; if any is wrong, nothing is imported and the dialog lists what to fix. Old positions and other short-lived packets bring up a warning before they're stored.",
       },
       {
         type: "callout",
