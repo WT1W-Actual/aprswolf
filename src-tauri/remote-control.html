@@ -167,6 +167,10 @@
       .config-bar { grid-template-columns: 1fr 1fr; }
       .settings-grid { grid-template-columns: 1fr 1fr; }
     }
+    /* iOS Safari zooms the page when a focused field's text is under 16px. */
+    @media (max-width: 760px), (pointer: coarse) {
+      input, select { font-size: 16px; }
+    }
     @media (max-width: 420px) {
       .send-row { grid-template-columns: 1fr auto; }
       .send-row .send-message { grid-column: 1 / -1; grid-row: 2; }
