@@ -125,4 +125,20 @@ describe("remote page settings", () => {
     await settle();
     expect(field("path").value).toBe("WIDE1-1,WIDE2-1");
   });
+
+  it("keeps an edit typed while a save is in flight", async () => {
+    const { page, window, field, type } = load();
+    await settle();
+
+    type("path", "WIDE2-2");
+    field("saveSettingsBtn").click();
+    type("path", "WIDE2-1");
+    await settle();
+    expect((page.saved as { path: string }).path).toBe("WIDE2-2");
+
+    page.state = snapshot(4, { path: "WIDE2-2" });
+    await window.refresh();
+    await settle();
+    expect(field("path").value).toBe("WIDE2-1");
+  });
 });

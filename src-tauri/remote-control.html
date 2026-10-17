@@ -607,6 +607,9 @@
     });
 
     $("saveSettingsBtn").addEventListener("click", async () => {
+      // What this save sends, so a field edited again while it is in flight
+      // stays unsaved.
+      const sentValues = new Map(SETTINGS_FIELDS.map(id => [id, $(id).value]));
       try {
         await api("POST", "/api/save-settings", {
           callsign: $("source").value,
@@ -621,7 +624,9 @@
           aprsis_passcode: $("aprsisPasscode").value,
           aprsis_filter: $("aprsisFilter").value,
         });
-        dirtyFields.clear();
+        for (const id of [...dirtyFields]) {
+          if ($(id).value === sentValues.get(id)) dirtyFields.delete(id);
+        }
         $("saveStatus").textContent = "Saved";
         pushLog("status", "Settings saved");
         refresh();

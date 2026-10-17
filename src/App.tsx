@@ -778,7 +778,7 @@ function App() {
             const live = new Map(prev.filter((item) => item.uuid).map((item) => [item.uuid, item]));
             return sent.map((item) => {
               const held = live.get(item.uuid);
-              if (held && (held.status === "queued" || held.status === "sent")) return held;
+              if (held && (held.status === "queued" || held.status === "sent" || held.status === "failed")) return held;
               return { ...item, id: held?.id ?? nextId() };
             });
           });
