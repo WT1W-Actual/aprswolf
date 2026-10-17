@@ -260,6 +260,10 @@ pub fn run() {
                 .separator()
                 .services()
                 .separator()
+                .hide_with_text("Hide APRSWolf")
+                .hide_others()
+                .show_all()
+                .separator()
                 .quit()
                 .build()?;
 
