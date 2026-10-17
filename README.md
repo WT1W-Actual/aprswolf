@@ -121,9 +121,9 @@ The [End User Guide](docs/END-USER-GUIDE.md) walks through the rest.
 ## What It Does
 
 - Connects to a TNC such as Dire Wolf or Graywolf over TCP (KISS to send, AGW to receive), or to APRS-IS over the internet.
-- Sends APRS messages with message numbers, then retries with backoff until the other station acks, the message fails, or it expires.
+- Sends APRS messages with message numbers, then retries with backoff (15 seconds, doubling to 4 minutes) until the other station acks or five tries go unanswered and the message expires. A send that fails to leave the computer is retried the same way.
 - Shows Sent and Received side by side, with each sent message's delivery status (queued, sent, acked, failed, expired) kept current.
-- Resends an expired message from its right-click menu, under its original message number.
+- Resends an expired message from its right-click menu, under its original message number. Resend waits while another message to that station still holds the number, and it only sends as the callsign that sent the message the first time.
 - Filters received traffic by type: To Me, Bulletins, Queries, Messages, Weather, Position, Status, Objects, Items, Mic-E, Telemetry, Other.
 - Starts a reply when you click a received message.
 - Keeps sent and received messages in a local database across restarts, and searches all of it from one search field.

@@ -192,7 +192,7 @@ Features:
 - Hide ACK messages unless you explicitly enable them
 - See a red count on `To Me` for messages addressed to you that arrived while APRSWolf was in the background; the app icon shows the same count unless you turn it off in Preferences
 - Search sent and received messages from the field in the Sent Messages header
-- Right-click an expired sent message and choose `Resend` to queue it again under its original message number
+- Right-click an expired sent message and choose `Resend` to queue it again under its original message number. It's refused while another message to that station is still waiting for an ack under the same number, or when the callsign in Preferences differs from the one the message was sent as
 - Hide or delete messages (see [Searching And Clearing Messages](#searching-and-clearing-messages))
 - Pop out a separate Messages window that shows sent and received together
 - Open the Help window for a task-focused walkthrough without leaving the app
@@ -400,7 +400,7 @@ What you can do from this page:
 - send messages from the send row at the top, laid out like the desktop main window
 - read sent and received messages side by side, filtered with All, To Me, Messages, and Bulletins (acks stay hidden unless Show ACKs is on in the desktop app's Preferences), and tap a received message to reply to its sender
 - connect or disconnect TNC or APRS-IS mode, send a beacon, and clear the queue from the bottom bar, where each has its status dot
-- change station and connection settings under Settings, and follow events under Activity
+- change station and connection settings under Settings, and follow events under Activity; a field you've changed keeps your edit until you click Save, even while new traffic arrives
 - turn remote control off with Disable Remote
 
 On a phone the Sent and Received panes stack.

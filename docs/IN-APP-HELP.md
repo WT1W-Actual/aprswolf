@@ -133,7 +133,7 @@ Use filters, search, the Messages window, and the traffic log to manage APRS tra
 - A red count on `To Me`, and on the app icon, shows messages addressed to you that arrived while APRSWolf was in the background. You can turn the app icon count off in Preferences.
 - `Promiscuous Base-Call` is a main-window toggle that also treats messages for your base callsign as yours.
 - The search field in the Sent Messages header searches sent and received messages across the whole history and filters both panes.
-- Right-click an expired sent message and choose `Resend` to queue it again under its original message number.
+- Right-click an expired sent message and choose `Resend` to queue it again under its original message number. It's refused while another message to that station still holds the number, or when your callsign has changed since it was sent.
 - `Pop Out` opens the Messages window: sent and received in one timeline, with its own search and reply behavior.
 - A packet heard twice, over RF and APRS-IS or through two digipeaters, is listed once.
 - Multipart stitching is applied for near-sequential fragments from the same station.
