@@ -1644,6 +1644,103 @@ pub async fn send_message(
     })
 }
 
+/// Put an expired message back at the start of its retries.
+fn rearm_for_resend(item: &mut QueuedMessage, now: u64) -> Result<(), String> {
+    if item.status != DeliveryState::Expired {
+        return Err("Only an expired message can be resent".to_string());
+    }
+    item.attempt_count = 0;
+    item.status = DeliveryState::Queued;
+    item.next_retry_at_ms = Some(now);
+    item.last_error = None;
+    Ok(())
+}
+
+/// Queue an expired message again under its original message number, so a
+/// station that heard an earlier copy and only lost its ack treats this one
+/// as a repeat. The queue starts empty at every launch, so a message from an
+/// earlier session is rebuilt from the sent history.
+#[tauri::command]
+pub async fn resend_message(app: AppHandle, uuid: String) -> Result<(), String> {
+    let state = app.state::<AppState>().inner().clone();
+    let aprsis_state = app.state::<crate::aprsis::AprsIsState>().inner().clone();
+
+    ensure_queue_storage(&app, &state).await?;
+
+    let in_queue = {
+        let mut queue = state.queue.lock().await;
+        match queue.iter_mut().find(|msg| msg.uuid == uuid) {
+            Some(item) => {
+                rearm_for_resend(item, now_ms())?;
+                Some(item.id)
+            }
+            None => None,
+        }
+    };
+
+    let message_id = match in_queue {
+        Some(id) => id,
+        None => {
+            let stored = crate::message_store::stored_sent(&app, &uuid)?
+                .ok_or_else(|| "That message is no longer in the history".to_string())?;
+            if stored.status != "expired" {
+                return Err("Only an expired message can be resent".to_string());
+            }
+            let message_id = {
+                let mut lock = state.next_id.lock().await;
+                let id = *lock;
+                *lock = lock.saturating_add(1);
+                id
+            };
+            let pending_reply_ack = latest_reply_ack_for_station(&state, &stored.to_call).await;
+            let payloads = build_queued_message_payloads(
+                &stored.from_call,
+                &stored.to_call,
+                &stored.path,
+                &stored.body,
+                &stored.aprs_id,
+                pending_reply_ack.as_deref(),
+            )?;
+            state.queue.lock().await.push(QueuedMessage {
+                id: message_id,
+                uuid: uuid.clone(),
+                destination: stored.to_call,
+                body: stored.body,
+                path: stored.path,
+                payload: payloads.ax25_hex.clone(),
+                ax25_hex: payloads.ax25_hex,
+                aprsis_payload: payloads.aprsis_payload,
+                source: stored.from_call,
+                aprs_id: stored.aprs_id,
+                created_at_ms: stored.created_at.max(0) as u64,
+                attempt_count: 0,
+                status: DeliveryState::Queued,
+                next_retry_at_ms: Some(now_ms()),
+                last_error: None,
+            });
+            message_id
+        }
+    };
+
+    persist_queue(&state).await?;
+
+    let snapshot = state
+        .queue
+        .lock()
+        .await
+        .iter()
+        .find(|msg| msg.id == message_id)
+        .cloned()
+        .ok_or_else(|| "Failed to resolve queued message state".to_string())?;
+    emit_delivery(&app, &snapshot, Some("resent".to_string()));
+
+    let has_transport = state.client.lock().await.is_some() || aprsis_state.handle.lock().await.is_some();
+    if has_transport {
+        let _ = send_attempt(&app, &state, message_id, "resend").await;
+    }
+    Ok(())
+}
+
 #[tauri::command]
 pub async fn send_beacon(
     app: AppHandle,
@@ -1815,7 +1912,7 @@ pub fn get_manual_beacon_cooldown_remaining(app: AppHandle) -> u64 {
 
 #[cfg(test)]
 mod tests {
-    use super::{build_queued_message_payloads, retry_delay_ms, retry_due, DeliveryState, QueuedMessage, MAX_ATTEMPTS, callsign_matches_station, ack_ids_for_station, is_agwpe_monitor_text, parse_ack_id, parse_ax25_station, parse_digipeater_path, resolve_uncompressed_symbol, split_reply_ack_id, strip_crlf, validate_aprs_message_text, validate_ax25_callsign, validate_position, validate_uncompressed_position_comment, APRS_TOCALL};
+    use super::{build_queued_message_payloads, rearm_for_resend, retry_delay_ms, retry_due, DeliveryState, QueuedMessage, MAX_ATTEMPTS, callsign_matches_station, ack_ids_for_station, is_agwpe_monitor_text, parse_ack_id, parse_ax25_station, parse_digipeater_path, resolve_uncompressed_symbol, split_reply_ack_id, strip_crlf, validate_aprs_message_text, validate_ax25_callsign, validate_position, validate_uncompressed_position_comment, APRS_TOCALL};
     use crate::ax25::build_aprs_position_info;
 
     #[test]
@@ -2085,6 +2182,29 @@ mod tests {
     fn retries_back_off_and_stop_after_the_last_attempt() {
         let delays: Vec<u64> = (1..=MAX_ATTEMPTS).map(retry_delay_ms).collect();
         assert_eq!(delays, vec![15_000, 30_000, 60_000, 120_000, 240_000]);
+    }
+
+    #[test]
+    fn resend_restarts_an_expired_message_under_its_own_number() {
+        let mut msg = queued(DeliveryState::Expired, None);
+        msg.attempt_count = MAX_ATTEMPTS;
+        msg.last_error = Some("max retry attempts reached".to_string());
+        rearm_for_resend(&mut msg, 50_000).unwrap();
+        assert_eq!(msg.status, DeliveryState::Queued);
+        assert_eq!(msg.attempt_count, 0);
+        assert_eq!(msg.next_retry_at_ms, Some(50_000));
+        assert_eq!(msg.last_error, None);
+        assert_eq!(msg.aprs_id, "1");
+        assert!(retry_due(&msg, 50_000));
+    }
+
+    #[test]
+    fn resend_refuses_a_message_still_in_flight_or_acked() {
+        for status in [DeliveryState::Queued, DeliveryState::Sent, DeliveryState::Failed, DeliveryState::Acked] {
+            let mut msg = queued(status.clone(), Some(10));
+            assert!(rearm_for_resend(&mut msg, 50_000).is_err());
+            assert_eq!(msg.status, status);
+        }
     }
 }
 

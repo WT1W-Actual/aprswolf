@@ -631,6 +631,43 @@ pub fn record_sent(app: &AppHandle, rec: &SentRecord) {
     let _ = with_store(app, |store| upsert_sent(&store.conn, rec, now_ms()).map_err(|err| err.to_string()));
 }
 
+/// A sent message as Resend needs it to queue the message again.
+#[derive(Debug, PartialEq)]
+pub struct StoredSent {
+    pub created_at: i64,
+    pub from_call: String,
+    pub to_call: String,
+    pub body: String,
+    pub path: String,
+    pub aprs_id: String,
+    pub status: String,
+}
+
+fn sent_by_uuid(conn: &Connection, uuid: &str) -> rusqlite::Result<Option<StoredSent>> {
+    conn.query_row(
+        "SELECT created_at, from_call, to_call, body, path, aprs_id, status FROM sent WHERE uuid = ?1",
+        params![uuid],
+        |row| {
+            Ok(StoredSent {
+                created_at: row.get(0)?,
+                from_call: row.get(1)?,
+                to_call: row.get(2)?,
+                body: row.get(3)?,
+                path: row.get(4)?,
+                aprs_id: row.get(5)?,
+                status: row.get(6)?,
+            })
+        },
+    )
+    .optional()
+}
+
+/// The stored copy of a sent message, for a Resend after the outbound queue
+/// has forgotten it (the queue starts empty at every launch).
+pub fn stored_sent(app: &AppHandle, uuid: &str) -> Result<Option<StoredSent>, String> {
+    with_store(app, |store| sent_by_uuid(&store.conn, uuid).map_err(|err| err.to_string()))
+}
+
 /// Newest-first sent messages, one page at a time.
 #[tauri::command]
 pub fn load_sent_messages(
@@ -1077,6 +1114,27 @@ mod tests {
         assert_eq!(rows[0]["attempts"], 1);
         assert_eq!(rows[0]["timestamp"], 1_000);
         assert_eq!(rows[0]["updatedAt"], 3_000);
+    }
+
+    #[test]
+    fn a_stored_sent_message_reads_back_for_resend() {
+        let conn = memory_db();
+        upsert_sent(&conn, &sent("s-1", "N6TEST-7", "expired", 5), 1_000).unwrap();
+
+        let stored = sent_by_uuid(&conn, "s-1").unwrap().unwrap();
+        assert_eq!(
+            stored,
+            StoredSent {
+                created_at: 1_000,
+                from_call: "WT1W-15".to_string(),
+                to_call: "N6TEST-7".to_string(),
+                body: "Hello".to_string(),
+                path: "WIDE1-1,WIDE2-1".to_string(),
+                aprs_id: "01".to_string(),
+                status: "expired".to_string(),
+            }
+        );
+        assert_eq!(sent_by_uuid(&conn, "missing").unwrap(), None);
     }
 
     #[test]

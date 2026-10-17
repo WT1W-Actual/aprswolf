@@ -192,6 +192,7 @@ Features:
 - Hide ACK messages unless you explicitly enable them
 - See a red count on `To Me` for messages addressed to you that arrived while APRSWolf was in the background; the app icon shows the same count unless you turn it off in Preferences
 - Search sent and received messages from the field in the Sent Messages header
+- Right-click an expired sent message and choose `Resend` to queue it again under its original message number
 - Hide or delete messages (see [Searching And Clearing Messages](#searching-and-clearing-messages))
 - Pop out a separate Messages window that shows sent and received together
 - Open the Help window for a task-focused walkthrough without leaving the app

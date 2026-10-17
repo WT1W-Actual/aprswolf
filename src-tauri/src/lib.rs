@@ -313,6 +313,7 @@ pub fn run() {
             tnc::connect_tnc,
             tnc::disconnect_tnc,
             tnc::send_message,
+            tnc::resend_message,
             tnc::clear_queue,
             tnc::inspect_queue,
             tnc::get_manual_beacon_cooldown_remaining,

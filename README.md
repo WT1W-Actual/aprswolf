@@ -123,6 +123,7 @@ The [End User Guide](docs/END-USER-GUIDE.md) walks through the rest.
 - Connects to a TNC such as Dire Wolf or Graywolf over TCP (KISS to send, AGW to receive), or to APRS-IS over the internet.
 - Sends APRS messages with message numbers, then retries with backoff until the other station acks, the message fails, or it expires.
 - Shows Sent and Received side by side, with each sent message's delivery status (queued, sent, acked, failed, expired) kept current.
+- Resends an expired message from its right-click menu, under its original message number.
 - Filters received traffic by type: To Me, Bulletins, Queries, Messages, Weather, Position, Status, Objects, Items, Mic-E, Telemetry, Other.
 - Starts a reply when you click a received message.
 - Keeps sent and received messages in a local database across restarts, and searches all of it from one search field.
@@ -160,7 +161,7 @@ What is kept:
 
 - Sent messages, and received messages, queries, and bulletins, are kept until you delete them.
 - Positions, weather, telemetry, status, objects, items, Mic-E, and acks are removed after 7 days by default. Change this under Preferences > Message History (1 day, 7 days, 30 days, or keep everything). The trim runs at most once an hour while packets arrive.
-- A sent message still waiting for its ack when the app closes is marked expired at the next launch, since nothing will retry it.
+- A sent message still waiting for its ack when the app closes is marked expired at the next launch, since nothing will retry it. Right-click it under Sent Messages and choose **Resend** to send it again.
 - A packet heard again within 30 seconds (over RF and APRS-IS, or through a second digipeater) is stored once. The Traffic Log still shows every copy, tagged `(duplicate)`.
 
 Each list loads the newest 200 messages. In the separate Messages window (**Pop Out ↗**), **Load older messages** at the bottom fetches the next 200.
