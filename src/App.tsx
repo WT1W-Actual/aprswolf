@@ -1185,6 +1185,24 @@ function App() {
     window.open(webServerUrl, "_blank", "noopener,noreferrer");
   }
 
+  async function openAprsFi(page: "map" | "messages") {
+    const call = source.trim();
+    if (!call) return;
+    const encoded = encodeURIComponent(call);
+    const url = page === "map"
+      ? `https://aprs.fi/#!call=a%2F${encoded}`
+      : `https://aprs.fi/?c=message&call=${encoded}`;
+    if (isTauriRuntime) {
+      try {
+        await openUrl(url);
+      } catch (error) {
+        pushLog("error", `open aprs.fi failed: ${String(error)}`);
+      }
+      return;
+    }
+    window.open(url, "_blank", "noopener,noreferrer");
+  }
+
   const filteredReceived = useMemo(() => {
     const ackFiltered = showAckMessages
       ? shownReceived
@@ -1553,6 +1571,12 @@ function App() {
             {manualBeaconCooldownSeconds > 0 ? (
               <span className="beacon-cooldown" aria-live="polite">{beaconCooldownLabel}</span>
             ) : null}
+            <button type="button" className="secondary" onClick={() => openAprsFi("map")} disabled={!source.trim()} title="Show this station on the aprs.fi map">
+              aprs.fi Map
+            </button>
+            <button type="button" className="secondary" onClick={() => openAprsFi("messages")} disabled={!source.trim()} title="Open this station's messages on aprs.fi">
+              aprs.fi Msgs
+            </button>
           </div>
         </div>
         <div className="config-sep" />

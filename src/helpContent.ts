@@ -118,6 +118,10 @@ export const HELP_SECTIONS: HelpSection[] = [
         title: "Auto-beacon behavior",
         text: "Automatic beacons are off by default. Check Beacon on connect to send one each time a connection is made, and set Auto-beacon every to send one on a timer. Both need beacon coordinates and a symbol.",
       },
+      {
+        type: "paragraph",
+        text: "aprs.fi Map and aprs.fi Msgs, beside Beacon in the Station row, open your callsign (with its SSID) on the aprs.fi map or its aprs.fi messages page in your browser. Both stay disabled until a callsign is set.",
+      },
     ],
   },
   {

@@ -1469,6 +1469,45 @@ describe("App", () => {
     expect(windowOpenSpy).not.toHaveBeenCalledWith("http://127.0.0.1:18420", "_blank", expect.anything());
     windowOpenSpy.mockRestore();
   });
+
+  it("opens the station's aprs.fi map and messages in the system browser", async () => {
+    openUrlMock.mockReset();
+    openUrlMock.mockResolvedValue(undefined);
+
+    render(<App />);
+
+    const mapButton = await screen.findByRole("button", { name: "aprs.fi Map" });
+    await waitFor(() => expect(mapButton).toBeEnabled());
+    fireEvent.click(mapButton);
+    await waitFor(() => expect(openUrlMock).toHaveBeenCalledWith("https://aprs.fi/#!call=a%2FWT1W-15"));
+
+    fireEvent.click(screen.getByRole("button", { name: "aprs.fi Msgs" }));
+    await waitFor(() => expect(openUrlMock).toHaveBeenCalledWith("https://aprs.fi/?c=message&call=WT1W-15"));
+  });
+
+  it("disables the aprs.fi buttons while no callsign is set", async () => {
+    invokeMock.mockImplementation((cmd: string) => {
+      if (cmd === "load_settings") {
+        return Promise.resolve({ ...DEFAULT_SETTINGS, source: "" });
+      }
+      if (cmd === "load_received_messages") {
+        return Promise.resolve([]);
+      }
+      if (cmd === "get_web_server_status") {
+        return Promise.resolve({ enabled: false, port: 18420, url: null });
+      }
+      if (cmd === "get_manual_beacon_cooldown_remaining") {
+        return Promise.resolve(0);
+      }
+      return Promise.resolve(undefined);
+    });
+
+    render(<App />);
+
+    expect(await screen.findByText("no callsign set")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "aprs.fi Map" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "aprs.fi Msgs" })).toBeDisabled();
+  });
 });
 
 describe("PreferencesWindow", () => {
