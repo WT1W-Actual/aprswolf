@@ -68,6 +68,8 @@ Configure your callsign, path, theme, sound, and optional beacon coordinates.
 
 Auto-beacon behavior: automatic beacons are off by default. Check `Beacon on connect` to send one each time a connection is made, and set `Auto-beacon every` to send one on a timer. Both need beacon coordinates and a symbol.
 
+`aprs.fi Map` and `aprs.fi Msgs`, beside `Beacon` in the Station row, open your callsign (with its SSID) on the aprs.fi map or its aprs.fi messages page in your browser. Both stay disabled until a callsign is set.
+
 ### TNC Mode
 
 Use any TNC that offers KISS and AGW over TCP, such as Dire Wolf or Graywolf, for RF messaging.

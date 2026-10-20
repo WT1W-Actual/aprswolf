@@ -327,6 +327,10 @@ Notes:
 
 Automatic beacons are off by default. In Preferences under Beacon, check `Beacon on connect` to send one each time a connection is made, and set `Auto-beacon every` to send one on a timer. Both need beacon coordinates and a symbol.
 
+## aprs.fi Buttons
+
+Beside `Beacon` in the Station row, `aprs.fi Map` opens your callsign on the aprs.fi map and `aprs.fi Msgs` opens its aprs.fi messages page, both in your browser. The callsign goes in as set in Preferences, SSID included. Both buttons stay disabled until a callsign is set.
+
 ## Activity Notice
 
 A brief highlighted banner appears in the main window when a message is sent or received.
