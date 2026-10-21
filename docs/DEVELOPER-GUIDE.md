@@ -443,7 +443,7 @@ See the [project README](../README.md) for quick-start commands. Full release pr
 # 2. Write release notes (copy RELEASE-NOTES-TEMPLATE.md → docs/releases/X.Y.Z.md)
 #    and add the new version to docs/releases/README.md
 # 3. Commit, then push a version tag:
-git tag v1.1.2 && git push origin v1.1.2
+git tag v1.1.3 && git push origin v1.1.3
 # 4. The `release` GitHub Actions workflow builds all platforms and
 #    attaches every artifact to a single GitHub Release.
 ```
@@ -478,6 +478,7 @@ DMGs.
 
 | Version | Date | Key Changes |
 |---------|------|-------------|
+| 1.1.3 | 2026-10-20 | `aprs.fi Map` and `aprs.fi Msgs` buttons in the Station row open the configured callsign on aprs.fi; Rust and npm dependency updates. |
 | 1.1.2 | 2026-10-17 | Outbound retries and Resend for expired messages; remote settings edits persist safely through live refreshes; later ACKs and multipart completions reach new-only exports. |
 | 1.1.1 | 2026-10-13 | Message export/import (`message_export.rs`, `message_import.rs`), About window (`AboutWindow.tsx`), remote page rebuilt to match the desktop main window, lists ordered by message time, schema v4/v5. |
 | 1.1.0 | 2026-10-12 | Message history in SQLite (`message_store.rs`), full-text search, hide/delete/select, unread `To Me` + app icon badge, reworked main window (send bar on top, compact status bar, header clock), unified Messages pop-out. |
@@ -490,5 +491,5 @@ DMGs.
 
 ---
 
-*Last updated: 2026-10-17 - v1.1.2 retries, Resend, remote settings protection, and export follow-up behavior documented.*
+*Last updated: 2026-10-20 - v1.1.3 aprs.fi Map/Msgs buttons and dependency updates documented.*
 *Next reader: you. This doc is your insurance against repeating the same bugs twice.*

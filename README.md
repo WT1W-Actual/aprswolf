@@ -36,15 +36,15 @@ No build tools needed.
 
 | Your computer | Download this |
 |---------------|---------------|
-| Mac, Intel | `APRSWolf_1.1.2_x64.dmg` |
-| Mac, Apple Silicon (M1/M2/M3/M4) | `APRSWolf_1.1.2_aarch64.dmg` |
-| Windows | `APRSWolf_1.1.2_x64-setup.exe` (or the `.msi`) |
-| Linux, Debian or Ubuntu (Intel/AMD 64-bit) | `APRSWolf_1.1.2_amd64.deb` |
-| Linux, Debian or Ubuntu (ARM64, e.g. Raspberry Pi OS 64-bit) | `APRSWolf_1.1.2_arm64.deb` |
-| Linux, Fedora or openSUSE (Intel/AMD 64-bit) | `APRSWolf-1.1.2-1.amd64.rpm` |
-| Linux, Fedora or openSUSE (ARM64) | `APRSWolf-1.1.2-1.arm64.rpm` |
-| Linux, any distro (Intel/AMD 64-bit) | `APRSWolf_1.1.2_amd64.AppImage` |
-| Linux, any distro (ARM64) | `APRSWolf_1.1.2_arm64.AppImage` |
+| Mac, Intel | `APRSWolf_1.1.3_x64.dmg` |
+| Mac, Apple Silicon (M1/M2/M3/M4) | `APRSWolf_1.1.3_aarch64.dmg` |
+| Windows | `APRSWolf_1.1.3_x64-setup.exe` (or the `.msi`) |
+| Linux, Debian or Ubuntu (Intel/AMD 64-bit) | `APRSWolf_1.1.3_amd64.deb` |
+| Linux, Debian or Ubuntu (ARM64, e.g. Raspberry Pi OS 64-bit) | `APRSWolf_1.1.3_arm64.deb` |
+| Linux, Fedora or openSUSE (Intel/AMD 64-bit) | `APRSWolf-1.1.3-1.amd64.rpm` |
+| Linux, Fedora or openSUSE (ARM64) | `APRSWolf-1.1.3-1.arm64.rpm` |
+| Linux, any distro (Intel/AMD 64-bit) | `APRSWolf_1.1.3_amd64.AppImage` |
+| Linux, any distro (ARM64) | `APRSWolf_1.1.3_arm64.AppImage` |
 
 **Which ARM build do I need?** The `aarch64` DMG is for **Apple Silicon Macs**
 (M1 and later). The `arm64` Linux packages are for **ARM64 Linux**, such as a
@@ -62,7 +62,7 @@ needs one extra click:
 - **Windows:** if SmartScreen says it protected your PC, click
   **More info**, then **Run anyway**.
 - **Linux AppImage:** make it executable first
-  (`chmod +x APRSWolf_1.1.2_amd64.AppImage`), then run it.
+  (`chmod +x APRSWolf_1.1.3_amd64.AppImage`), then run it.
 
 ### Getting started
 
@@ -121,7 +121,7 @@ The [End User Guide](docs/END-USER-GUIDE.md) walks through the rest.
 - In-app help reference: see [docs/IN-APP-HELP.md](docs/IN-APP-HELP.md)
 - Release notes template: see [docs/RELEASE-NOTES-TEMPLATE.md](docs/RELEASE-NOTES-TEMPLATE.md)
 - Release index: see [docs/releases/README.md](docs/releases/README.md)
-- Current release notes: see [docs/releases/1.1.2.md](docs/releases/1.1.2.md)
+- Current release notes: see [docs/releases/1.1.3.md](docs/releases/1.1.3.md)
 
 ## What It Does
 

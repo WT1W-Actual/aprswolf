@@ -4,6 +4,7 @@ This folder contains versioned release notes for published APRSWolf builds.
 
 ## Available Releases
 
+- [v1.1.3](1.1.3.md)
 - [v1.1.2](1.1.2.md)
 - [v1.1.1](1.1.1.md)
 - [v1.1.0](1.1.0.md)
